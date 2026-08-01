@@ -1,0 +1,28 @@
+# Python bytecode / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Poetry / Dependency managers
+poetry.lock
+.poetry/
+
+# Godot / Editor configs
+.godot/
+.vscode/
+.idea/
+*.log
