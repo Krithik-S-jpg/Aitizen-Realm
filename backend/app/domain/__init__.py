@@ -10,13 +10,26 @@ from app.domain.interfaces import (
     ISimulationEngine,
     TaskExecutor,
 )
-from app.domain.models import EngineState, Event, ScheduledTask, Tick
+from app.domain.models import (
+    Chunk,
+    EngineState,
+    Event,
+    ScheduledTask,
+    TerrainType,
+    Tick,
+    Tile,
+    World,
+)
 
 __all__ = [
     "EngineState",
     "Tick",
     "Event",
     "ScheduledTask",
+    "TerrainType",
+    "Tile",
+    "Chunk",
+    "World",
     "IEventBus",
     "EventHandler",
     "IScheduler",

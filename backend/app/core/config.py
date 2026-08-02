@@ -19,5 +19,8 @@ class Settings(BaseSettings):
     DEFAULT_TICK_RATE: float = 1.0
     LOG_LEVEL: str = "INFO"
 
+    # World configurations
+    CHUNK_SIZE: int = 16
+
 
 settings = Settings()
