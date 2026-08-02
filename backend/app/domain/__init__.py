@@ -8,6 +8,7 @@ from app.domain.interfaces import (
     IEventBus,
     IScheduler,
     ISimulationEngine,
+    IWorldRepository,
     TaskExecutor,
 )
 from app.domain.models import (
@@ -35,4 +36,5 @@ __all__ = [
     "IScheduler",
     "TaskExecutor",
     "ISimulationEngine",
+    "IWorldRepository",
 ]

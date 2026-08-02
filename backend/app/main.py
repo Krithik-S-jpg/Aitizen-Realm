@@ -14,6 +14,7 @@ from app.infrastructure.api.v1.simulation import (
 from app.infrastructure.api.v1.simulation import (
     router as simulation_router,
 )
+from app.infrastructure.api.v1.world import router as world_router
 
 
 @asynccontextmanager
@@ -54,4 +55,10 @@ app.include_router(
     simulation_router,
     prefix=f"{settings.API_V1_STR}/simulation",
     tags=["simulation"],
+)
+
+app.include_router(
+    world_router,
+    prefix=f"{settings.API_V1_STR}/world",
+    tags=["world"],
 )

@@ -4,12 +4,14 @@ Maintains and provides singleton instances of core simulation components.
 """
 
 from app.application.services.engine_service import EngineService
+from app.application.services.world_service import WorldService
 from app.core.config import settings
 from app.domain.interfaces.engine import ISimulationEngine
 from app.domain.interfaces.event_bus import IEventBus
 from app.domain.interfaces.scheduler import IScheduler
 from app.infrastructure.engine.loop_engine import LoopEngine
 from app.infrastructure.event_bus.memory_bus import InMemoryEventBus
+from app.infrastructure.repositories.world_repository import InMemoryWorldRepository
 from app.infrastructure.scheduler.memory_scheduler import MemoryScheduler
 
 # Singletons initialization
@@ -21,6 +23,9 @@ _engine = LoopEngine(
     ticks_per_second=settings.DEFAULT_TICK_RATE,
 )
 _engine_service = EngineService(engine=_engine)
+
+_world_repository = InMemoryWorldRepository()
+_world_service = WorldService(repository=_world_repository)
 
 
 def get_event_bus() -> IEventBus:
@@ -41,3 +46,8 @@ def get_engine() -> ISimulationEngine:
 def get_engine_service() -> EngineService:
     """Returns the singleton EngineService instance."""
     return _engine_service
+
+
+def get_world_service() -> WorldService:
+    """Returns the singleton WorldService instance."""
+    return _world_service
