@@ -35,6 +35,12 @@ func _on_world_data_received(data: Dictionary) -> void:
 		_on_connection_failed("Malformed data structure returned by backend")
 		return
 
+	# Explicitly print metrics as requested by Godot networking layer spec
+	print("World width: %d" % _parsed_world["width"])
+	print("World height: %d" % _parsed_world["height"])
+	print("Chunk size: %d" % _parsed_world["chunk_size"])
+	print("Number of tiles: %d" % _parsed_world["tiles"].size())
+
 	# Draw the world
 	renderer.render_world(_parsed_world["tiles"])
 

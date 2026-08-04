@@ -42,4 +42,4 @@ func _process(_delta: float) -> void:
 	label_fps.text = "FPS: %d" % Engine.get_frames_per_second()
 
 func _on_retry_pressed() -> void:
-	emit_signal("reload_requested")
+	reload_requested.emit()
