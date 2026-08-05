@@ -1,8 +1,8 @@
-# HUD.gd
+# DebugHUD.gd
 extends Control
-class_name HUD
+class_name DebugHUD
 
-## Displays client status metrics, including connection state and loaded world attributes.
+## Visualizes client-side system metrics and active connection configurations.
 
 signal reload_requested()
 
@@ -19,7 +19,7 @@ func _ready() -> void:
 	retry_button.pressed.connect(_on_retry_pressed)
 	retry_button.hide()
 
-## Formats HUD state to show connection success.
+## Alters the visible connection state label color and text parameters.
 func update_status(is_connected: bool, error_msg: String = "") -> void:
 	if is_connected:
 		label_status.text = "Connection Status: Connected"
@@ -30,7 +30,7 @@ func update_status(is_connected: bool, error_msg: String = "") -> void:
 		label_status.add_theme_color_override("font_color", Color.RED)
 		retry_button.show()
 
-## Formats HUD metrics to match active map state.
+## Displays metadata details fetched from the API response payload.
 func update_world_info(url: String, width: int, height: int, chunk_size: int, tiles_count: int) -> void:
 	label_url.text = "Backend URL: %s" % url
 	label_size.text = "World Size: %d x %d" % [width, height]
