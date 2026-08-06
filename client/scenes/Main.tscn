@@ -1,221 +1,24 @@
-[gd_scene format=3 uid="uid://cxmainscene"]
+[gd_scene load_steps=9 format=3 uid="uid://cxmainscene"]
 
-[ext_resource type="Script" uid="uid://c5lnmouvhqblh" path="res://scripts/core/Main.gd" id="1_main"]
-[ext_resource type="Script" uid="uid://k6ifabcudwsh" path="res://scripts/camera/CameraController.gd" id="2_camera"]
-[ext_resource type="PackedScene" uid="uid://cxworldscene" path="res://scenes/World.tscn" id="3_world_scene"]
-[ext_resource type="Script" uid="uid://b8wx6e72d7xon" path="res://scripts/ui/DebugHUD.gd" id="4_hud"]
-[ext_resource type="Texture2D" uid="uid://gcllmnsgb10r" path="res://asserts/tilesets/Tiles/grass_center_E.png" id="4_jlsqs"]
-[ext_resource type="Script" uid="uid://ctk2yx6yshe1h" path="res://scripts/ui/TileInspector.gd" id="5_inspector"]
-[ext_resource type="Script" uid="uid://ccmfssx3xogmv" path="res://scripts/world/WorldRenderer.gd" id="5_q8u5g"]
-[ext_resource type="Script" uid="uid://cfcgoo0b4amn" path="res://scripts/network/WorldApiClient.gd" id="6_api"]
-[ext_resource type="Script" uid="uid://bt4yp2vqje0lg" path="res://scripts/world/WorldLoader.gd" id="7_loader"]
+[ext_resource type="Script" path="res://scripts/core/Main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/camera/CameraController.gd" id="2_camera"]
+[ext_resource type="PackedScene" path="res://scenes/World.tscn" id="3_world_scene"]
+[ext_resource type="Script" path="res://scripts/ui/DebugHUD.gd" id="4_hud"]
+[ext_resource type="Script" path="res://scripts/ui/TileInspector.gd" id="5_inspector"]
+[ext_resource type="Script" path="res://scripts/network/WorldApiClient.gd" id="6_api"]
+[ext_resource type="Script" path="res://scripts/world/WorldLoader.gd" id="7_loader"]
 
-[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8u5g"]
-resource_name = "world_tileset.tres"
-texture = ExtResource("4_jlsqs")
-5:8/0 = 0
-6:8/0 = 0
-7:8/0 = 0
-8:8/0 = 0
-9:8/0 = 0
-10:8/0 = 0
-3:9/0 = 0
-4:9/0 = 0
-5:9/0 = 0
-6:9/0 = 0
-7:9/0 = 0
-8:9/0 = 0
-9:9/0 = 0
-10:9/0 = 0
-11:9/0 = 0
-12:9/0 = 0
-1:10/0 = 0
-2:10/0 = 0
-3:10/0 = 0
-4:10/0 = 0
-5:10/0 = 0
-6:10/0 = 0
-7:10/0 = 0
-8:10/0 = 0
-9:10/0 = 0
-10:10/0 = 0
-11:10/0 = 0
-12:10/0 = 0
-13:10/0 = 0
-14:10/0 = 0
-0:11/0 = 0
-1:11/0 = 0
-2:11/0 = 0
-3:11/0 = 0
-4:11/0 = 0
-5:11/0 = 0
-6:11/0 = 0
-7:11/0 = 0
-8:11/0 = 0
-9:11/0 = 0
-10:11/0 = 0
-11:11/0 = 0
-12:11/0 = 0
-13:11/0 = 0
-14:11/0 = 0
-15:11/0 = 0
-0:12/0 = 0
-1:12/0 = 0
-2:12/0 = 0
-3:12/0 = 0
-4:12/0 = 0
-5:12/0 = 0
-6:12/0 = 0
-7:12/0 = 0
-8:12/0 = 0
-9:12/0 = 0
-10:12/0 = 0
-11:12/0 = 0
-12:12/0 = 0
-13:12/0 = 0
-14:12/0 = 0
-15:12/0 = 0
-0:13/0 = 0
-1:13/0 = 0
-2:13/0 = 0
-3:13/0 = 0
-4:13/0 = 0
-5:13/0 = 0
-6:13/0 = 0
-7:13/0 = 0
-8:13/0 = 0
-9:13/0 = 0
-10:13/0 = 0
-11:13/0 = 0
-12:13/0 = 0
-13:13/0 = 0
-14:13/0 = 0
-15:13/0 = 0
-0:14/0 = 0
-1:14/0 = 0
-2:14/0 = 0
-3:14/0 = 0
-4:14/0 = 0
-5:14/0 = 0
-6:14/0 = 0
-7:14/0 = 0
-8:14/0 = 0
-9:14/0 = 0
-10:14/0 = 0
-11:14/0 = 0
-12:14/0 = 0
-13:14/0 = 0
-14:14/0 = 0
-15:14/0 = 0
-0:15/0 = 0
-1:15/0 = 0
-2:15/0 = 0
-3:15/0 = 0
-4:15/0 = 0
-5:15/0 = 0
-6:15/0 = 0
-7:15/0 = 0
-8:15/0 = 0
-9:15/0 = 0
-10:15/0 = 0
-11:15/0 = 0
-12:15/0 = 0
-13:15/0 = 0
-14:15/0 = 0
-15:15/0 = 0
-0:16/0 = 0
-1:16/0 = 0
-2:16/0 = 0
-3:16/0 = 0
-4:16/0 = 0
-5:16/0 = 0
-6:16/0 = 0
-7:16/0 = 0
-8:16/0 = 0
-9:16/0 = 0
-10:16/0 = 0
-11:16/0 = 0
-12:16/0 = 0
-13:16/0 = 0
-14:16/0 = 0
-15:16/0 = 0
-0:17/0 = 0
-1:17/0 = 0
-2:17/0 = 0
-3:17/0 = 0
-4:17/0 = 0
-5:17/0 = 0
-6:17/0 = 0
-7:17/0 = 0
-8:17/0 = 0
-9:17/0 = 0
-10:17/0 = 0
-11:17/0 = 0
-12:17/0 = 0
-13:17/0 = 0
-14:17/0 = 0
-15:17/0 = 0
-0:18/0 = 0
-1:18/0 = 0
-2:18/0 = 0
-3:18/0 = 0
-4:18/0 = 0
-5:18/0 = 0
-6:18/0 = 0
-7:18/0 = 0
-8:18/0 = 0
-9:18/0 = 0
-10:18/0 = 0
-11:18/0 = 0
-12:18/0 = 0
-13:18/0 = 0
-14:18/0 = 0
-15:18/0 = 0
-2:19/0 = 0
-3:19/0 = 0
-4:19/0 = 0
-5:19/0 = 0
-6:19/0 = 0
-7:19/0 = 0
-8:19/0 = 0
-9:19/0 = 0
-10:19/0 = 0
-11:19/0 = 0
-12:19/0 = 0
-13:19/0 = 0
-4:20/0 = 0
-5:20/0 = 0
-6:20/0 = 0
-7:20/0 = 0
-8:20/0 = 0
-9:20/0 = 0
-10:20/0 = 0
-11:20/0 = 0
-6:21/0 = 0
-7:21/0 = 0
-8:21/0 = 0
-9:21/0 = 0
-
-[sub_resource type="TileSet" id="TileSet_k56px"]
-tile_shape = 1
-tile_layout = 4
-sources/0 = SubResource("TileSetAtlasSource_q8u5g")
-
-[node name="Main" type="Node2D" unique_id=1558375062]
+[node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
-[node name="Camera2D" type="Camera2D" parent="." unique_id=1883274559]
+[node name="Camera2D" type="Camera2D" parent="."]
 script = ExtResource("2_camera")
 
-[node name="World" parent="." unique_id=12856252 instance=ExtResource("3_world_scene")]
+[node name="World" parent="." instance=ExtResource("3_world_scene")]
 
-[node name="TileMapLayer" type="TileMapLayer" parent="World" unique_id=1625930130]
-tile_set = SubResource("TileSet_k56px")
-script = ExtResource("5_q8u5g")
+[node name="UI" type="CanvasLayer" parent="."]
 
-[node name="UI" type="CanvasLayer" parent="." unique_id=1187010731]
-
-[node name="DebugPanel" type="Control" parent="UI" unique_id=1134943946]
+[node name="DebugPanel" type="Control" parent="UI"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -225,49 +28,50 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("4_hud")
 
-[node name="MarginContainer" type="MarginContainer" parent="UI/DebugPanel" unique_id=1450040854]
+[node name="MarginContainer" type="MarginContainer" parent="UI/DebugPanel"]
 layout_mode = 1
+anchors_preset = 0
 offset_right = 40.0
 offset_bottom = 40.0
 theme_override_constants/margin_left = 20
 theme_override_constants/margin_top = 20
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI/DebugPanel/MarginContainer" unique_id=1343507481]
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/DebugPanel/MarginContainer"]
 layout_mode = 2
 
-[node name="ConnectionStatus" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=208197043]
+[node name="ConnectionStatus" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "Connection Status: Disconnected"
 
-[node name="BackendURL" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=1730589954]
+[node name="BackendURL" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "Backend URL: http://127.0.0.1:8000/api/v1/world"
 
-[node name="WorldSize" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=223647375]
+[node name="WorldSize" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "World Size: N/A"
 
-[node name="ChunkSize" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=1972030823]
+[node name="ChunkSize" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "Chunk Size: N/A"
 
-[node name="LoadedTileCount" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=2031106118]
+[node name="LoadedTileCount" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "Loaded Tile Count: N/A"
 
-[node name="FPS" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=571363756]
+[node name="FPS" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "FPS: 0"
 
-[node name="TPS" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=258869265]
+[node name="TPS" type="Label" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "TPS: N/A"
 
-[node name="RetryButton" type="Button" parent="UI/DebugPanel/MarginContainer/VBoxContainer" unique_id=970829795]
+[node name="RetryButton" type="Button" parent="UI/DebugPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "Retry Connection"
 
-[node name="TileInspector" type="Control" parent="UI" unique_id=1663985247]
+[node name="TileInspector" type="Control" parent="UI"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -277,7 +81,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("5_inspector")
 
-[node name="PanelContainer" type="PanelContainer" parent="UI/TileInspector" unique_id=1327654399]
+[node name="PanelContainer" type="PanelContainer" parent="UI/TileInspector"]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -291,38 +95,38 @@ offset_bottom = -20.0
 grow_horizontal = 0
 grow_vertical = 0
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI/TileInspector/PanelContainer" unique_id=698022186]
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/TileInspector/PanelContainer"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer" unique_id=1241591824]
+[node name="Title" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer"]
 layout_mode = 2
 theme_type_variation = &"HeaderMedium"
 text = "Tile Inspector"
 horizontal_alignment = 1
 
-[node name="Position" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer" unique_id=1389654934]
+[node name="Position" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer"]
 layout_mode = 2
 text = "World Position: N/A"
 
-[node name="Chunk" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer" unique_id=1235030932]
+[node name="Chunk" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer"]
 layout_mode = 2
 text = "Chunk Position: N/A"
 
-[node name="Terrain" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer" unique_id=2062259764]
+[node name="Terrain" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer"]
 layout_mode = 2
 text = "Terrain: N/A"
 
-[node name="TileID" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer" unique_id=731177318]
+[node name="TileID" type="Label" parent="UI/TileInspector/PanelContainer/VBoxContainer"]
 layout_mode = 2
 text = "Tile ID: N/A"
 
-[node name="CloseButton" type="Button" parent="UI/TileInspector/PanelContainer/VBoxContainer" unique_id=74960231]
+[node name="CloseButton" type="Button" parent="UI/TileInspector/PanelContainer/VBoxContainer"]
 layout_mode = 2
 text = "Close"
 
-[node name="WorldApiClient" type="Node" parent="." unique_id=1860171231]
+[node name="WorldApiClient" type="Node" parent="."]
 script = ExtResource("6_api")
 
-[node name="WorldLoader" type="Node" parent="." unique_id=14922761]
+[node name="WorldLoader" type="Node" parent="."]
 script = ExtResource("7_loader")
