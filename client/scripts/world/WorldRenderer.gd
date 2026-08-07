@@ -14,6 +14,16 @@ func _ready() -> void:
 			mapper = TerrainMapper.new()
 			add_child(mapper)
 
+	# Debug manually painted cells on startup (Step 5)
+	print("=== Manually Painted Cells On Startup ===")
+	var cells = get_used_cells()
+	print("Number of manually painted cells on startup: %d" % cells.size())
+	for c in cells:
+		var sid = get_cell_source_id(c)
+		var atlas = get_cell_atlas_coords(c)
+		print("Cell coord: %s, Source ID: %d, Atlas coords: %s" % [str(c), sid, str(atlas)])
+	print("=========================================")
+
 ## Populates cells matching coordinate maps and terrain indices.
 func render_world(tiles: Dictionary) -> void:
 	# 1. Debug Checklist 1: Verify the runtime structure and print the type
@@ -26,9 +36,20 @@ func render_world(tiles: Dictionary) -> void:
 		push_error("WorldRenderer Error: TileSet is missing on the TileMapLayer node.")
 		return
 
+	# Try printing first manually painted cell info before clearing (Step 5)
+	var startup_cells = get_used_cells()
+	var manual_source_id = -1
+	var manual_atlas_coords = Vector2i(-1, -1)
+	if startup_cells.size() > 0:
+		manual_source_id = get_cell_source_id(startup_cells[0])
+		manual_atlas_coords = get_cell_atlas_coords(startup_cells[0])
+		print("Before clear: First manual cell is Source ID: %d, Atlas: %s" % [manual_source_id, str(manual_atlas_coords)])
+
 	clear()
 
-	var source_id = mapper.get_source_id()
+	# Determine source_id dynamically or fallback to mapper rules
+	var source_id = manual_source_id if manual_source_id != -1 else mapper.get_source_id()
+
 	if not tile_set.has_source(source_id):
 		push_error("WorldRenderer Error: Configured Source ID %d does not exist in the TileSet." % source_id)
 		return
@@ -43,7 +64,7 @@ func render_world(tiles: Dictionary) -> void:
 	# Try placing a single test tile first as per Step 4
 	print("=== Renderer Test Started (Step 4) ===")
 	var test_coord = Vector2i(0, 0)
-	var test_atlas = mapper.get_atlas_coords("grass")
+	var test_atlas = manual_atlas_coords if manual_atlas_coords != Vector2i(-1, -1) else mapper.get_atlas_coords("grass")
 	set_cell(test_coord, source_id, test_atlas)
 
 	var cell_source = get_cell_source_id(test_coord)
@@ -64,7 +85,7 @@ func render_world(tiles: Dictionary) -> void:
 		var terrain = tile_data.get("terrain", "")
 
 		# Resolve terrain
-		var atlas_coord = mapper.get_atlas_coords(terrain)
+		var atlas_coord = manual_atlas_coords if (manual_atlas_coords != Vector2i(-1, -1) and terrain == "grass") else mapper.get_atlas_coords(terrain)
 		if atlas_coord == mapper.FALLBACK_COORDS and terrain != "grass":
 			unknown_terrain += 1
 			push_warning("WorldRenderer Warning: Unmapped terrain type '%s' at (%d, %d), falling back." % [terrain, coord.x, coord.y])
