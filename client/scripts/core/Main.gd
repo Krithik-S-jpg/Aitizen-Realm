@@ -50,13 +50,22 @@ func _on_world_loaded(parsed_world: Dictionary) -> void:
 	# Instruct visual renderer to draw
 	world_scene.render_parsed_world(_parsed_world)
 
-	# Center the camera on the generated map as per Requirement 6
-	var center_tile = Vector2i(_parsed_world["width"] / 2, _parsed_world["height"] / 2)
+	# Center the camera on the generated map using get_used_rect() and map_to_local()
 	var renderer = world_scene.renderer
 	if renderer:
+		var rect = renderer.get_used_rect()
+		var center_tile = rect.position + rect.size / 2
 		var target_global_pos = renderer.map_to_local(center_tile)
+
 		$Camera2D.global_position = target_global_pos
-		print("Camera centered on world center at absolute position: %s, pixel position: %s" % [str(center_tile), str(target_global_pos)])
+
+		# Position Camera2D so the complete 20x20 isometric world is visible on startup
+		var target_zoom = 0.8
+		$Camera2D.zoom = Vector2(target_zoom, target_zoom)
+		if "_target_zoom" in $Camera2D:
+			$Camera2D._target_zoom = target_zoom
+
+		print("Camera centered on world center using get_used_rect(): %s, pixel position: %s" % [str(center_tile), str(target_global_pos)])
 
 	# Update debug labels
 	hud.update_status(true)
