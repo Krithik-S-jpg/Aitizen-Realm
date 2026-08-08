@@ -14,42 +14,31 @@ func _ready() -> void:
 			mapper = TerrainMapper.new()
 			add_child(mapper)
 
-	# Debug manually painted cells on startup (Step 5)
-	print("=== Manually Painted Cells On Startup ===")
-	var cells = get_used_cells()
-	print("Number of manually painted cells on startup: %d" % cells.size())
-	for c in cells:
-		var sid = get_cell_source_id(c)
-		var atlas = get_cell_atlas_coords(c)
-		print("Cell coord: %s, Source ID: %d, Atlas coords: %s" % [str(c), sid, str(atlas)])
-	print("=========================================")
+	# Dynamically discover TileSet properties to prevent hardcoding assumptions (Requirement 4)
+	if tile_set:
+		var source_count = tile_set.get_source_count()
+		if source_count > 0:
+			var active_source_id = tile_set.get_source_id(0)
+			var source = tile_set.get_source(active_source_id)
+			if source is TileSetAtlasSource:
+				var atlas_source = source as TileSetAtlasSource
+				if atlas_source.get_tiles_count() > 0:
+					# Read the first tile in the atlas correctly from the TileSet
+					var discovered_grass_coords = atlas_source.get_tile_id(0)
+					print("TileSet Discovery: Grass tile atlas coordinates in editor are %s" % str(discovered_grass_coords))
+					# Update TerrainMapper grass coordinates dynamically
+					mapper.update_grass_coords(active_source_id, discovered_grass_coords)
 
 ## Populates cells matching coordinate maps and terrain indices.
 func render_world(tiles: Dictionary) -> void:
-	# 1. Debug Checklist 1: Verify the runtime structure and print the type
-	print("--- Debug Checklist 1 ---")
-	print("Runtime type of tiles passed into render_world(): ", "Dictionary" if typeof(tiles) == TYPE_DICTIONARY else "Array" if typeof(tiles) == TYPE_ARRAY else str(typeof(tiles)))
-	print("-------------------------")
-
-	# 2. Validation checks
+	# 1. Validation checks
 	if not tile_set:
 		push_error("WorldRenderer Error: TileSet is missing on the TileMapLayer node.")
 		return
 
-	# Try printing first manually painted cell info before clearing (Step 5)
-	var startup_cells = get_used_cells()
-	var manual_source_id = -1
-	var manual_atlas_coords = Vector2i(-1, -1)
-	if startup_cells.size() > 0:
-		manual_source_id = get_cell_source_id(startup_cells[0])
-		manual_atlas_coords = get_cell_atlas_coords(startup_cells[0])
-		print("Before clear: First manual cell is Source ID: %d, Atlas: %s" % [manual_source_id, str(manual_atlas_coords)])
-
 	clear()
 
-	# Determine source_id dynamically or fallback to mapper rules
-	var source_id = manual_source_id if manual_source_id != -1 else mapper.get_source_id()
-
+	var source_id = mapper.get_source_id()
 	if not tile_set.has_source(source_id):
 		push_error("WorldRenderer Error: Configured Source ID %d does not exist in the TileSet." % source_id)
 		return
@@ -61,31 +50,14 @@ func render_world(tiles: Dictionary) -> void:
 	var unknown_terrain: int = 0
 	var tiles_failed: int = 0
 
-	# Try placing a single test tile first as per Step 4
-	print("=== Renderer Test Started (Step 4) ===")
-	var test_coord = Vector2i(0, 0)
-	var test_atlas = manual_atlas_coords if manual_atlas_coords != Vector2i(-1, -1) else mapper.get_atlas_coords("grass")
-	set_cell(test_coord, source_id, test_atlas)
-
-	var cell_source = get_cell_source_id(test_coord)
-	var cell_atlas = get_cell_atlas_coords(test_coord)
-	if cell_source == source_id and cell_atlas == test_atlas:
-		print("Test tile placed successfully at (0, 0)")
-	else:
-		push_error("WorldRenderer Error: Placement validation failed for test tile.")
-	print("=============================")
-
-	# Clear test cell before performing full render loop
-	clear()
-
-	# 3. Step 5 & 6: Full rendering loop of backend tiles
+	# 2. Render backend tiles
 	for coord in tiles:
 		tiles_attempted += 1
 		var tile_data = tiles[coord]
 		var terrain = tile_data.get("terrain", "")
 
 		# Resolve terrain
-		var atlas_coord = manual_atlas_coords if (manual_atlas_coords != Vector2i(-1, -1) and terrain == "grass") else mapper.get_atlas_coords(terrain)
+		var atlas_coord = mapper.get_atlas_coords(terrain)
 		if atlas_coord == mapper.FALLBACK_COORDS and terrain != "grass":
 			unknown_terrain += 1
 			push_warning("WorldRenderer Warning: Unmapped terrain type '%s' at (%d, %d), falling back." % [terrain, coord.x, coord.y])
@@ -100,17 +72,6 @@ func render_world(tiles: Dictionary) -> void:
 		else:
 			tiles_failed += 1
 			push_error("WorldRenderer Error: Failed to place tile at (%d, %d)." % [coord.x, coord.y])
-
-	# 4. Debug Checklist 7: Print mandated debug metrics
-	print("--- Debug Checklist 7 ---")
-	print("Received tiles: %d" % tiles_received)
-	print("Rendered tiles: %d" % tiles_placed)
-	print("Source ID: %d" % source_id)
-	print("Atlas coords: %s" % str(test_atlas))
-	if tiles.size() > 0:
-		var first_key = tiles.keys()[0]
-		print("First tile position: %s" % str(first_key))
-	print("-------------------------")
 
 	# Print Render Report (Step 10)
 	print("=== Aitizen Realm Render Report ===")
