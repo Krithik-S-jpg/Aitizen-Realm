@@ -12,9 +12,7 @@ var _terrain_coords: Dictionary = {
 	"grass": Vector2i(0, 0),
 	"dirt": Vector2i(1, 0),
 	"stone": Vector2i(2, 0),
-	"water": Vector2i(3, 0),
-	"forest": Vector2i(4, 0),
-	"sand": Vector2i(5, 0)
+	"water": Vector2i(3, 0)
 }
 
 ## Returns the appropriate atlas coordinates for a terrain string, or a default fallback if unknown.

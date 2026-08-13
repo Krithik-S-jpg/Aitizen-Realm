@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://scripts/world/World.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/world/WorldRenderer.gd" id="2_renderer"]
 [ext_resource type="Script" path="res://scripts/world/TerrainMapper.gd" id="3_mapper"]
-[ext_resource type="Texture2D" path="res://assets/tileset.png" id="4_tileset_texture"]
+[ext_resource type="Texture2D" path="res://assets/tilesets/aitizen_realm_tileset.png" id="4_tileset_texture"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_terrain"]
 resource_name = "Terrain"
@@ -13,8 +13,6 @@ texture_region_size = Vector2i(64, 32)
 1:0/0 = 0
 2:0/0 = 0
 3:0/0 = 0
-4:0/0 = 0
-5:0/0 = 0
 
 [sub_resource type="TileSet" id="TileSet_isometric"]
 tile_shape = 1
