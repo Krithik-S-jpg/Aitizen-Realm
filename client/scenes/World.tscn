@@ -1,9 +1,10 @@
-[gd_scene load_steps=6 format=3 uid="uid://cxworldscene"]
+[gd_scene load_steps=7 format=3 uid="uid://cxworldscene"]
 
 [ext_resource type="Script" path="res://scripts/world/World.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/world/WorldRenderer.gd" id="2_renderer"]
 [ext_resource type="Script" path="res://scripts/world/TerrainMapper.gd" id="3_mapper"]
 [ext_resource type="Texture2D" path="res://assets/tilesets/aitizen_realm_tileset.png" id="4_tileset_texture"]
+[ext_resource type="Script" path="res://scripts/world/DebugWorldRenderer.gd" id="5_debug_renderer"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_terrain"]
 resource_name = "Terrain"
@@ -24,8 +25,12 @@ sources/0 = SubResource("TileSetAtlasSource_terrain")
 script = ExtResource("1_world")
 
 [node name="TileMap" type="TileMapLayer" parent="."]
+visible = false
 tile_set = SubResource("TileSet_isometric")
 script = ExtResource("2_renderer")
 
 [node name="TerrainMapper" type="Node" parent="TileMap"]
 script = ExtResource("3_mapper")
+
+[node name="DebugWorldRenderer" type="Node2D" parent="."]
+script = ExtResource("5_debug_renderer")
