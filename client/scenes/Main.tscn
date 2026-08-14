@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/ui/TileInspector.gd" id="5_inspector"]
 [ext_resource type="Script" path="res://scripts/network/WorldApiClient.gd" id="6_api"]
 [ext_resource type="Script" path="res://scripts/world/WorldLoader.gd" id="7_loader"]
+[ext_resource type="Script" path="res://scripts/debug/DebugRenderTest.gd" id="8_debug_test"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -130,3 +131,6 @@ script = ExtResource("6_api")
 
 [node name="WorldLoader" type="Node" parent="."]
 script = ExtResource("7_loader")
+
+[node name="DebugRenderTest" type="Node2D" parent="."]
+script = ExtResource("8_debug_test")
