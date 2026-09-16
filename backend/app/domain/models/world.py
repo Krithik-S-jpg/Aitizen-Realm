@@ -12,6 +12,14 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.domain.models.cognition import Action, Goal
+from app.domain.models.entity import Entity, EntityKnowledge
+from app.domain.models.inventory import Inventory
+from app.domain.models.memory import Episode, Message
+from app.domain.models.navigation import MovementPlan
+from app.domain.models.resource import ResourceNode
+from app.domain.models.society import SocialBond, SocialGroup
+from app.domain.models.structure import Structure
 
 
 class TerrainType(StrEnum):
@@ -23,6 +31,17 @@ class TerrainType(StrEnum):
     STONE = "STONE"
     FOREST = "FOREST"
     SAND = "SAND"
+    OCEAN = "OCEAN"
+    MOUNTAIN = "MOUNTAIN"
+    DESERT = "DESERT"
+    TUNDRA = "TUNDRA"
+    WETLAND = "WETLAND"
+    SNOW = "SNOW"
+    ICE = "ICE"
+    MEADOW = "MEADOW"
+    SWAMP = "SWAMP"
+    SAVANNA = "SAVANNA"
+    VOLCANIC = "VOLCANIC"
 
 
 class Tile(BaseModel):
@@ -198,10 +217,41 @@ class Chunk(BaseModel):
 class World(BaseModel):
     """Represents the complete simulation map holding chunks of tiles."""
 
+    width: int = Field(default=0, ge=0, description="World width in tiles")
+    height: int = Field(default=0, ge=0, description="World height in tiles")
+    seed: int | None = Field(default=None, description="Procedural generation seed")
+    resources: dict[str, ResourceNode] = Field(
+        default_factory=dict, description="Resource nodes indexed by UUID string"
+    )
+    inventories: dict[str, Inventory] = Field(default_factory=dict)
+    structures: dict[str, Structure] = Field(default_factory=dict)
+    entities: dict[str, Entity] = Field(default_factory=dict)
+    entity_knowledge: dict[str, EntityKnowledge] = Field(default_factory=dict)
+    movement_plans: dict[str, MovementPlan] = Field(default_factory=dict)
+    goals: dict[str, Goal] = Field(default_factory=dict)
+    actions: dict[str, Action] = Field(default_factory=dict)
+    active_goals: dict[str, str] = Field(default_factory=dict)
+    active_actions: dict[str, str] = Field(default_factory=dict)
+    episodes: dict[str, list[Episode]] = Field(default_factory=dict)
+    messages: list[Message] = Field(default_factory=list)
+    social_bonds: dict[str, SocialBond] = Field(default_factory=dict)
+    groups: dict[str, SocialGroup] = Field(default_factory=dict)
     chunks: dict[str, Chunk] = Field(
         default_factory=dict,
         description="Dictionary mapping 'cx,cy' coordinate keys to Chunk",
     )
+
+    def add_resource(self, resource: ResourceNode) -> None:
+        """Registers a resource node in the world."""
+        self.resources[str(resource.id)] = resource
+
+    def resources_at(self, x: int, y: int) -> list[ResourceNode]:
+        """Returns all non-depleted resource nodes at a world coordinate."""
+        return [
+            resource
+            for resource in self.resources.values()
+            if resource.x == x and resource.y == y and not resource.depleted
+        ]
 
     def create_chunk(
         self,

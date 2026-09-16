@@ -7,13 +7,24 @@ from fastapi import FastAPI
 
 from app.core.config import settings
 from app.core.logging import setup_logging
-from app.infrastructure.api.dependencies import get_engine_service, get_event_bus
+from app.infrastructure.api.dependencies import (
+    advance_world_entities,
+    advance_world_resources,
+    capture_world_metrics,
+    get_engine_service,
+    get_event_bus,
+)
+from app.infrastructure.api.v1.actions import router as actions_router
+from app.infrastructure.api.v1.communications import router as communications_router
+from app.infrastructure.api.v1.entities import router as entities_router
+from app.infrastructure.api.v1.research import router as research_router
 from app.infrastructure.api.v1.simulation import (
     register_event_broadcaster,
 )
 from app.infrastructure.api.v1.simulation import (
     router as simulation_router,
 )
+from app.infrastructure.api.v1.society import router as society_router
 from app.infrastructure.api.v1.world import router as world_router
 
 
@@ -26,6 +37,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # 2. Register event subscribers (e.g. WebSocket broadcaster)
     event_bus = get_event_bus()
     await register_event_broadcaster(event_bus)
+    event_bus.subscribe("tick:completed", advance_world_resources)
+    event_bus.subscribe("tick:completed", advance_world_entities)
+    event_bus.subscribe("tick:completed", capture_world_metrics)
 
     yield
 
@@ -55,6 +69,36 @@ app.include_router(
     simulation_router,
     prefix=f"{settings.API_V1_STR}/simulation",
     tags=["simulation"],
+)
+
+app.include_router(
+    society_router,
+    prefix=f"{settings.API_V1_STR}/society",
+    tags=["society"],
+)
+
+app.include_router(
+    research_router,
+    prefix=f"{settings.API_V1_STR}/research",
+    tags=["research"],
+)
+
+app.include_router(
+    actions_router,
+    prefix=f"{settings.API_V1_STR}/actions",
+    tags=["actions"],
+)
+
+app.include_router(
+    entities_router,
+    prefix=f"{settings.API_V1_STR}/entities",
+    tags=["entities"],
+)
+
+app.include_router(
+    communications_router,
+    prefix=f"{settings.API_V1_STR}/communications",
+    tags=["communications"],
 )
 
 app.include_router(

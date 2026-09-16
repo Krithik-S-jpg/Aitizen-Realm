@@ -18,9 +18,11 @@ from fastapi import (
 )
 
 from app.application.services.engine_service import EngineService
+from app.application.services.world_service import WorldService
 from app.domain.interfaces.event_bus import IEventBus
+from app.domain.models.calendar import calendar_at_tick
 from app.domain.models.engine import Event
-from app.infrastructure.api.dependencies import get_engine_service
+from app.infrastructure.api.dependencies import get_engine_service, get_world_service
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,7 @@ async def register_event_broadcaster(event_bus: IEventBus) -> None:
             "tick": event.tick,
             "timestamp": event.timestamp,
             "payload": event.payload,
+            "calendar": calendar_at_tick(event.tick).model_dump(mode="json"),
         }
         await manager.broadcast(message)
 
@@ -124,11 +127,13 @@ async def register_event_broadcaster(event_bus: IEventBus) -> None:
 @router.get("/state", response_model=dict[str, Any])
 def get_state(
     engine_service: EngineService = Depends(get_engine_service),
+    world_service: WorldService = Depends(get_world_service),
 ) -> dict[str, Any]:
     """Gets the current status and tick state of the simulation.
 
     Args:
         engine_service: The EngineService dependency.
+        world_service: The active world used to calculate aggregate health metrics.
 
     Returns:
         JSON object containing state and tick.
@@ -139,6 +144,8 @@ def get_state(
         "tick_rate": engine_service.get_tick_rate(),
         "current_tick": tick.value,
         "tick_timestamp": tick.timestamp,
+        "calendar": calendar_at_tick(tick.value).model_dump(mode="json"),
+        "world_health": world_service.get_health_snapshot(),
     }
 
 
@@ -295,6 +302,7 @@ async def websocket_endpoint(
                 "tick_rate": engine_service.get_tick_rate(),
                 "current_tick": tick.value,
                 "tick_timestamp": tick.timestamp,
+                "calendar": calendar_at_tick(tick.value).model_dump(mode="json"),
             }
         )
 

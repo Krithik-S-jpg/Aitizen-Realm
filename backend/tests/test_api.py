@@ -19,6 +19,60 @@ def test_simulation_state_endpoint(api_client: TestClient) -> None:
     data = response.json()
     assert "state" in data
     assert data["current_tick"] == 0
+    assert data["calendar"]["season"] == "SPRING"
+    assert data["calendar"]["phase"] == "DAWN"
+    assert data["world_health"]["resources"] >= 0
+    assert 0.0 <= data["world_health"]["average_resource_ratio"] <= 1.0
+
+
+def test_generated_world_contains_one_autonomous_player(api_client: TestClient) -> None:
+    """Every playable world receives a backend-owned autonomous focus agent."""
+    world = api_client.post("/api/v1/world/generate?seed=847291").json()
+    players = [entity for entity in world["entities"] if "player" in entity["tags"]]
+    assert len(players) == 1
+    assert "autonomous" in players[0]["tags"]
+    assert players[0]["needs"]["health"] == 100.0
+    assert players[0]["goal"] == "idle"
+
+
+def test_world_exposes_versioned_observation_layers(api_client: TestClient) -> None:
+    """Observers can distinguish real layers from unimplemented systems."""
+    payload = api_client.get("/api/v1/world").json()
+    assert payload["schema_version"] == "1.0"
+    assert payload["layer_support"]["terrain"] == "available"
+    assert payload["layer_support"]["population"] == "available"
+    assert payload["layer_support"]["wealth"] == "not_implemented"
+    agent = payload["entities"][0]
+    assert "knowledge" in agent
+    assert "memory_count" in agent
+    assert "relationship_count" in agent
+
+
+def test_live_resource_endpoint_avoids_resending_the_entire_tile_grid(
+    api_client: TestClient,
+) -> None:
+    """Frequent resource refreshes use a compact resource-only contract."""
+    response = api_client.get("/api/v1/world/resources")
+    assert response.status_code == 200
+    resources = response.json()
+    assert isinstance(resources, list)
+    assert resources
+    assert {"id", "type", "x", "y", "quantity"} <= resources[0].keys()
+
+
+def test_citizen_observation_contract_uses_real_subsystem_state(
+    api_client: TestClient,
+) -> None:
+    """Citizen inspection aggregates memory, actions, knowledge, and bonds."""
+    world = api_client.get("/api/v1/world").json()
+    entity_id = world["entities"][0]["id"]
+    response = api_client.get(f"/api/v1/entities/{entity_id}/observation")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "1.0"
+    assert payload["entity"]["id"] == entity_id
+    assert payload["availability"]["memory"] == "available"
+    assert payload["availability"]["mood"] == "not_implemented"
 
 
 def test_simulation_lifecycle_endpoints(api_client: TestClient) -> None:

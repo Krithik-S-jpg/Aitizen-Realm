@@ -1,0 +1,115 @@
+"""Lifecycle operations for generic simulation entities."""
+
+from uuid import UUID
+
+from app.domain.interfaces.world_repository import IWorldRepository
+from app.domain.models.entity import Entity, EntityKind, EntityKnowledge
+from app.domain.models.inventory import Inventory
+from app.domain.models.needs import NeedsState
+from app.domain.models.world import World
+
+
+class EntityService:
+    """Creates and manages identities without adding autonomous behavior."""
+
+    def __init__(self, repository: IWorldRepository) -> None:
+        """Initializes the service against the authoritative world store."""
+        self._repository = repository
+
+    def create(
+        self,
+        kind: EntityKind,
+        name: str,
+        x: int,
+        y: int,
+        perception_radius: int = 6,
+        tags: set[str] | None = None,
+    ) -> Entity:
+        """Creates an entity on a loaded, walkable world tile."""
+        world = self._require_world()
+        tile = world.retrieve_tile(x, y)
+        if tile is None:
+            raise LookupError("Entity tile is not loaded.")
+        if not tile.walkable:
+            raise ValueError("Entity requires a walkable tile.")
+        entity = Entity(
+            kind=kind,
+            name=name,
+            x=x,
+            y=y,
+            perception_radius=perception_radius,
+            tags=tags or set(),
+            needs=NeedsState()
+            if kind in {EntityKind.AGENT, EntityKind.ANIMAL}
+            else None,
+        )
+        world.entities[str(entity.id)] = entity
+        world.entity_knowledge[str(entity.id)] = EntityKnowledge(observer_id=entity.id)
+        world.episodes[str(entity.id)] = []
+        world.inventories.setdefault(str(entity.id), Inventory())
+        return entity
+
+    def get(self, entity_id: UUID) -> Entity:
+        """Returns an entity by stable identity."""
+        entity = self._require_world().entities.get(str(entity_id))
+        if entity is None:
+            raise LookupError("Entity does not exist.")
+        return entity
+
+    def list_active(self) -> list[Entity]:
+        """Returns active entities in deterministic identity order."""
+        entities = [
+            item for item in self._require_world().entities.values() if item.active
+        ]
+        return sorted(entities, key=lambda item: str(item.id))
+
+    def deactivate(self, entity_id: UUID) -> Entity:
+        """Marks an entity inactive while retaining history and knowledge."""
+        entity = self.get(entity_id)
+        entity.active = False
+        return entity
+
+    def admin_overview(self) -> list[dict[str, object]]:
+        """Returns operational details needed by the local simulation console."""
+        world = self._require_world()
+        result: list[dict[str, object]] = []
+        for entity in self.list_active():
+            key = str(entity.id)
+            goal = world.goals.get(world.active_goals.get(key, ""))
+            action = world.actions.get(world.active_actions.get(key, ""))
+            knowledge = world.entity_knowledge.get(key)
+            inventory = world.inventories.get(key)
+            result.append(
+                {
+                    **entity.model_dump(mode="json"),
+                    "kind": entity.kind.value.lower(),
+                    "inventory": inventory.model_dump()
+                    if inventory is not None
+                    else None,
+                    "goal": goal.goal_type.value.lower()
+                    if goal is not None
+                    else ("survive" if entity.kind == EntityKind.ANIMAL else "idle"),
+                    "action": action.action_type.value.lower()
+                    if action is not None
+                    else str(entity.metadata.get("state", "idle")),
+                    "action_progress": action.progress_ratio
+                    if action is not None
+                    else 0.0,
+                    "action_target": action.target if action is not None else {},
+                    "knowledge": {
+                        "tiles": len(knowledge.tiles),
+                        "resources": len(knowledge.resources),
+                        "structures": len(knowledge.structures),
+                        "entities": len(knowledge.entities),
+                    }
+                    if knowledge is not None
+                    else {},
+                }
+            )
+        return result
+
+    def _require_world(self) -> World:
+        world = self._repository.get()
+        if world is None:
+            raise LookupError("No active world exists.")
+        return world

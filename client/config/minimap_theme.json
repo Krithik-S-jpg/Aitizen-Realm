@@ -1,0 +1,18 @@
+{
+  "background": "#071722f2",
+  "border": "#376672",
+  "terrain_colors": {
+    "water": "#3188c8",
+    "ocean": "#185b98",
+    "grass": "#41a95d",
+    "forest": "#176b3b",
+    "sand": "#d8bc70",
+    "desert": "#bd7d3e",
+    "stone": "#747b80",
+    "mountain": "#4e565d",
+    "snow": "#e5efee",
+    "ice": "#81c5d4",
+    "wetland": "#39745d",
+    "tundra": "#aabdb7"
+  }
+}
