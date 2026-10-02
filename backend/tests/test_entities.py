@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.application.services.entity_service import EntityService
 from app.application.services.perception_service import PerceptionService
 from app.application.services.world_generator import WorldGenerator
-from app.domain.models.entity import EntityKind
+from app.domain.models.entity import CitizenAvatar, EntityKind
 from app.domain.models.resource import ResourceNode, ResourceType
 from app.domain.models.structure import Structure, StructureType
 from app.infrastructure.repositories.world_repository import InMemoryWorldRepository
@@ -55,6 +55,48 @@ def test_generic_entity_lifecycle_creates_inventory_and_knowledge() -> None:
     assert entities.list_active() == [entity]
     assert perception.knowledge(entity.id).observer_id == entity.id
     assert entities.deactivate(entity.id).active is False
+    assert entities.list_active() == []
+
+
+def test_citizen_avatar_is_persistent_and_validated() -> None:
+    """Citizen appearance is authoritative simulation data, not a UI-only choice."""
+    entities, _ = _services()
+    entity = entities.create(
+        EntityKind.AGENT,
+        "Mira",
+        5,
+        5,
+        avatar_id=CitizenAvatar.HERBALIST,
+    )
+    restored = type(entity).model_validate_json(entity.model_dump_json())
+    assert restored.avatar_id == CitizenAvatar.HERBALIST
+
+
+def test_automatic_spawn_avoids_water_and_occupied_tiles() -> None:
+    entities, _ = _services()
+    world = entities._require_world()
+    world.retrieve_tile(5, 5).walkable = False
+    with pytest.raises(ValueError, match="walkable"):
+        entities.create(EntityKind.AGENT, "Exact", 5, 5)
+    first = entities.create(
+        EntityKind.AGENT, "Fern", 5, 5,
+        avatar_id=CitizenAvatar.HERBALIST, auto_spawn=True,
+    )
+    second = entities.create(EntityKind.AGENT, "Second", 5, 5, auto_spawn=True)
+    assert world.retrieve_tile(first.x, first.y).walkable
+    assert (first.x, first.y) != (5, 5)
+    assert (first.x, first.y) != (second.x, second.y)
+    assert first.avatar_id == CitizenAvatar.HERBALIST
+
+
+def test_automatic_spawn_fails_without_creating_entity_if_no_land() -> None:
+    entities, _ = _services()
+    world = entities._require_world()
+    for chunk in world.chunks.values():
+        for tile in chunk.iterate_tiles():
+            tile.walkable = False
+    with pytest.raises(ValueError, match="No free walkable tile"):
+        entities.create(EntityKind.AGENT, "No land", 5, 5, auto_spawn=True)
     assert entities.list_active() == []
 
 
@@ -125,9 +167,11 @@ def test_entity_and_perception_api_contract(api_client: TestClient) -> None:
             "x": spawn_tile["x"],
             "y": spawn_tile["y"],
             "perception_radius": 3,
+            "avatar_id": "scholar",
         },
     )
     assert created.status_code == 200
+    assert created.json()["avatar_id"] == "scholar"
     entity_id = created.json()["id"]
 
     observed = api_client.post(

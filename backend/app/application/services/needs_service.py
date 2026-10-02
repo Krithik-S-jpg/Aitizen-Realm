@@ -3,8 +3,8 @@
 from uuid import UUID
 
 from app.domain.interfaces.world_repository import IWorldRepository
-from app.domain.models.calendar import calendar_at_tick
-from app.domain.models.entity import Entity
+from app.domain.models.calendar import calendar_at_tick, get_calendar_control
+from app.domain.models.entity import Entity, EntityKind
 from app.domain.models.structure import StructureType
 from app.domain.models.world import TerrainType, World
 
@@ -40,12 +40,44 @@ class NeedsService:
         for entity in world.entities.values():
             if not entity.active or entity.needs is None:
                 continue
+            if (
+                entity.kind == EntityKind.AGENT
+                and tick > 0
+                and tick % get_calendar_control().ticks_per_day == 0
+            ):
+                age_days = (
+                    int(
+                        entity.metadata.setdefault(
+                            "age_days", 18 * 365 + entity.id.int % (30 * 365)
+                        )
+                    )
+                    + 1
+                )
+                maximum_age = int(
+                    entity.metadata.setdefault(
+                        "maximum_age_days", 68 * 365 + entity.id.int % (24 * 365)
+                    )
+                )
+                entity.metadata["age_days"] = age_days
+                entity.metadata["life_stage"] = (
+                    "elder" if age_days >= 60 * 365 else "adult"
+                )
+                if age_days >= maximum_age:
+                    entity.active = False
+                    entity.metadata.update(
+                        {"death_tick": tick, "death_cause": "old_age", "state": "dead"}
+                    )
+                    continue
             tile = world.retrieve_tile(entity.x, entity.y)
             local_modifier = 0.0
             if tile is not None:
                 climate = float(tile.metadata.get("temperature", 0.5))
                 local_modifier = (climate - 0.5) * 10.0
-            exposure = 1.0 + calendar.weather_intensity * 0.5
+            exposure = (
+                1.0
+                + calendar.weather_intensity * 0.5
+                + max(0.0, calendar.wind_speed - 5.0) * 0.035
+            )
             nearby_structures = [
                 structure
                 for structure in world.structures.values()
@@ -64,7 +96,7 @@ class NeedsService:
             )
             if sheltered:
                 exposure *= 0.35
-            local_temperature = calendar.temperature_c + local_modifier
+            local_temperature = calendar.feels_like_c + local_modifier
             if heated and local_temperature < 20.0:
                 local_temperature = min(20.0, local_temperature + 8.0)
             movement = world.movement_plans.get(str(entity.id))
@@ -82,6 +114,13 @@ class NeedsService:
                 entity.needs.safety = min(100.0, entity.needs.safety + 0.35)
             if entity.needs.health <= 0.0:
                 entity.active = False
+                entity.metadata.update(
+                    {
+                        "death_tick": tick,
+                        "death_cause": "starvation_or_exposure",
+                        "state": "dead",
+                    }
+                )
 
     FOOD_EFFECTS = {
         "food": (8.0, 0.0, 0.0),

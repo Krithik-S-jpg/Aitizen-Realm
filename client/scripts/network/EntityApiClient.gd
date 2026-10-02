@@ -27,7 +27,7 @@ func fetch_overview() -> void:
 	_send(entities_url + "/admin/overview", HTTPClient.METHOD_GET, "overview")
 
 
-func create_agent(agent_name: String, x: int, y: int, radius: int, autonomous: bool) -> void:
+func create_agent(agent_name: String, x: int, y: int, radius: int, autonomous: bool, avatar_id: String) -> void:
 	var tags: Array[String] = []
 	if autonomous:
 		tags.append("autonomous")
@@ -37,7 +37,9 @@ func create_agent(agent_name: String, x: int, y: int, radius: int, autonomous: b
 		"x": x,
 		"y": y,
 		"perception_radius": radius,
-		"tags": tags
+		"tags": tags,
+		"avatar_id": avatar_id,
+		"auto_spawn": true
 	})
 	_send(entities_url, HTTPClient.METHOD_POST, "create", body)
 
@@ -69,6 +71,9 @@ func _on_request_completed(
 ) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
 		var detail := body.get_string_from_utf8()
+		var error_payload: Variant = JSON.parse_string(detail)
+		if error_payload is Dictionary and error_payload.get("detail") is String:
+			detail = str(error_payload["detail"])
 		request_failed.emit("Agent request failed (HTTP %d): %s" % [response_code, detail])
 		return
 	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())

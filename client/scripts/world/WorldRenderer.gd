@@ -36,10 +36,19 @@ const RIGHT_EDGE_COLOR := Color("9a5128")
 const HOVER_COLOR := Color(1.0, 1.0, 1.0, 0.32)
 const SELECTED_COLOR := Color("fff2a8")
 const NO_TILE := Vector2i(2147483647, 2147483647)
-const ANIMATION_FPS := 12.0
+const ANIMATION_FPS := 24.0
+const CitizenVisuals = preload("res://scripts/world/CitizenVisuals.gd")
+const CITIZEN_AVATAR_ORDER := ["scout", "builder", "herbalist", "scholar", "cook", "miner", "fisher", "artisan"]
+const CITIZEN_AVATAR_TINTS: Dictionary = {
+	"scout": Color("1fa9ad"), "builder": Color("d86835"),
+	"herbalist": Color("6f9f45"), "scholar": Color("536bd5"),
+	"cook": Color("b94750"), "miner": Color("d79b22"),
+	"fisher": Color("389fd8"), "artisan": Color("8556c9")
+}
 
 var _tiles: Dictionary = {}
 var _resources: Array = []
+var _effect_resources: Dictionary = {}
 var _structures: Array = []
 var _entities: Array = []
 var _active_mining: Dictionary = {}
@@ -52,7 +61,10 @@ func set_simulation_running(running: bool) -> void:
 		for key: Variant in _entity_target_positions:
 			_entity_visual_positions[key] = _entity_target_positions[key]
 			_entity_motion_amounts[key] = 0.0
-	queue_redraw()
+	if _is_dynamic_layer:
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.set_simulation_running(running)
 
 func _visual_msec() -> int:
 	return int(_visual_seconds * 1000.0)
@@ -65,7 +77,14 @@ var _population_positions: Dictionary = {}
 var _entity_visual_positions: Dictionary = {}
 var _entity_target_positions: Dictionary = {}
 var _entity_motion_amounts: Dictionary = {}
+var _entity_stride_distances: Dictionary = {}
+var _entity_facing: Dictionary = {}
+var _entity_segment_starts: Dictionary = {}
+var _entity_segment_elapsed: Dictionary = {}
+var _movement_interval := 1.0
 var _sprite_atlas: Texture2D
+var _citizen_roster: Texture2D
+var _buildables_atlas: Texture2D
 var _agent_sprite_regions: Dictionary = {}
 var _environment_atlas: Texture2D
 var _resource_sprite_regions: Dictionary = {}
@@ -82,11 +101,83 @@ var _ordered_coordinates: Array[Vector2i] = []
 var _ordered_resources: Array = []
 var _ordered_structures: Array = []
 var _ordered_entities: Array = []
-var _animation_accumulator := 0.0
+var _local_view_rect := Rect2()
+var _tile_view_rect := Rect2()
+var _object_view_rect := Rect2()
+var _draw_detail_level := 2
+var _quality_detail_cap := 2
+var _has_action_animation := false
+var _weather := "CLEAR"
+var _weather_intensity := 0.0
+var _wind_speed := 0.0
+var _wind_direction := 0.0
+var _temperature_c := 18.0
+var _is_dynamic_layer := false
+var _dynamic_layer: WorldRenderer
+var _terrain_mesh: MeshInstance2D
+var _terrain_mesh_dirty := true
 
 
 func _ready() -> void:
 	_load_sprite_atlas_config()
+	set_process(_is_dynamic_layer)
+	if not _is_dynamic_layer:
+		_dynamic_layer = WorldRenderer.new()
+		_dynamic_layer._is_dynamic_layer = true
+		_dynamic_layer.tile_width = tile_width
+		_dynamic_layer.tile_height = tile_height
+		_dynamic_layer.slab_depth = slab_depth
+		_dynamic_layer.chunk_size = chunk_size
+		_dynamic_layer.visible_chunk_radius = visible_chunk_radius
+		_dynamic_layer.z_index = 1
+		add_child(_dynamic_layer)
+
+
+func configure_environment(calendar: Dictionary) -> void:
+	_weather = str(calendar.get("weather", "CLEAR")).to_upper()
+	_weather_intensity = clampf(float(calendar.get("weather_intensity", 0.0)), 0.0, 1.0)
+	_wind_speed = maxf(float(calendar.get("wind_speed", 0.0)), 0.0)
+	_wind_direction = float(calendar.get("wind_direction", 0.0))
+	_temperature_c = float(calendar.get("feels_like_c", calendar.get("temperature_c", 18.0)))
+	if _is_dynamic_layer:
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.configure_environment(calendar)
+
+
+func set_simulation_tick_rate(ticks_per_second: float) -> void:
+	# Snapshots arrive once per simulation tick. Interpolate across that exact
+	# interval so slow rates remain fluid and fast rates do not lag behind.
+	_movement_interval = clampf(1.0 / maxf(ticks_per_second, 0.05), 0.08, 2.0)
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.set_simulation_tick_rate(ticks_per_second)
+
+
+func set_visual_quality(quality: String) -> void:
+	_quality_detail_cap = {"performance": 0, "balanced": 1, "high": 2}.get(quality.to_lower(), 2)
+	queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.set_visual_quality(quality)
+
+
+func _wind_vector() -> Vector2:
+	var radians := deg_to_rad(_wind_direction)
+	return Vector2(sin(radians), cos(radians) * 0.35).normalized()
+
+
+func _gust(seed_position: Vector2, flexibility: float = 1.0) -> float:
+	if _wind_speed <= 0.05:
+		return 0.0
+	var phase := _visual_seconds * (1.1 + _wind_speed * 0.055) + seed_position.x * 0.021 + seed_position.y * 0.037
+	var pulse := sin(phase) * 0.62 + sin(phase * 2.37 + 1.8) * 0.25 + sin(phase * 0.43) * 0.13
+	return pulse * clampf(_wind_speed / 12.0, 0.0, 1.5) * flexibility
+
+
+func _wind_angle(seed_position: Vector2, flexibility: float = 1.0) -> float:
+	var direction_sign := signf(_wind_vector().x)
+	if is_zero_approx(direction_sign):
+		direction_sign = 1.0
+	return _gust(seed_position, flexibility) * 0.055 * direction_sign
 
 
 func render_world(
@@ -95,23 +186,46 @@ func render_world(
 	structures: Array = [],
 	entities: Array = []
 ) -> void:
-	_tiles = tiles.duplicate(true)
-	_resources = resources.duplicate(true)
-	_structures = structures.duplicate(true)
+	_tiles = tiles if _is_dynamic_layer else tiles.duplicate(true)
+	_terrain_mesh_dirty = true
+	_resources = resources if _is_dynamic_layer else resources.duplicate(true)
+	_structures = structures if _is_dynamic_layer else structures.duplicate(true)
 	update_entities(entities)
 	_refresh_resource_positions()
 	_rebuild_draw_order()
 	queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.render_world(_tiles, _resources, _structures, _entities)
+
+
+## Returns the inclusive map-space bounds of the currently loaded tiles.
+## WorldRenderer is a Node2D rather than a TileMapLayer, so callers must use
+## this explicit compatibility helper instead of relying on TileMap APIs.
+func get_used_rect() -> Rect2i:
+	if _tiles.is_empty():
+		return Rect2i()
+	var first: Vector2i = _tiles.keys()[0]
+	var minimum := first
+	var maximum := first
+	for coordinate: Vector2i in _tiles:
+		minimum.x = mini(minimum.x, coordinate.x)
+		minimum.y = mini(minimum.y, coordinate.y)
+		maximum.x = maxi(maximum.x, coordinate.x)
+		maximum.y = maxi(maximum.y, coordinate.y)
+	return Rect2i(minimum, maximum - minimum + Vector2i.ONE)
 
 
 func update_structures(structures: Array) -> void:
-	_structures = structures.duplicate(true)
+	_structures = structures if _is_dynamic_layer else structures.duplicate(true)
 	_rebuild_draw_order()
-	queue_redraw()
+	if _is_dynamic_layer:
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.update_structures(_structures)
 
 
 func update_resources(resources: Array) -> void:
-	_resources = resources.duplicate(true)
+	_resources = resources if _is_dynamic_layer else resources.duplicate(true)
 	var falling_now: Dictionary = {}
 	for resource: Dictionary in _resources:
 		if str(resource.get("visual_state", "standing")) == "fallen":
@@ -121,22 +235,34 @@ func update_resources(resources: Array) -> void:
 			_resource_fall_started_ms.erase(key)
 	_refresh_resource_positions()
 	_rebuild_draw_order()
-	queue_redraw()
+	if _is_dynamic_layer or _active_layer == "resources":
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.update_resources(_resources)
 
 
 func update_entities(entities: Array) -> void:
-	_entities = entities.duplicate(true)
+	_entities = entities if _is_dynamic_layer else entities.duplicate(true)
 	_population_positions.clear()
 	_active_chops.clear()
 	_active_mining.clear()
+	_has_action_animation = false
 	var present: Dictionary = {}
 	for entity: Dictionary in _entities:
+		if str(entity.get("action", "idle")).to_lower() in ["move", "wander", "patrol", "regroup", "return_home", "seek_water", "seek_shelter", "seek_weather_shelter", "forage", "flee", "chase", "hunt", "feed", "graze", "drink", "root", "chop", "gather", "pluck", "build", "craft", "sleep", "migrate", "follow_parent", "care_young", "nest"]:
+			_has_action_animation = true
 		var key := str(entity.get("id", "%s,%s" % [entity.get("x", 0), entity.get("y", 0)]))
 		var target := Vector2(float(entity.get("x", 0)), float(entity.get("y", 0)))
 		present[key] = true
-		_entity_target_positions[key] = target
+		var previous_target: Vector2 = _entity_target_positions.get(key, target)
 		if not _entity_visual_positions.has(key) or not _simulation_running:
 			_entity_visual_positions[key] = target
+			_entity_segment_starts[key] = target
+			_entity_segment_elapsed[key] = _movement_interval
+		elif previous_target.distance_squared_to(target) > 0.00001:
+			_entity_segment_starts[key] = _entity_visual_positions[key]
+			_entity_segment_elapsed[key] = 0.0
+		_entity_target_positions[key] = target
 		var map_position := Vector2i(roundi(target.x), roundi(target.y))
 		_population_positions[map_position] = int(_population_positions.get(map_position, 0)) + 1
 		if str(entity.get("action", "")).to_lower() in ["chop", "gather", "mine"]:
@@ -155,45 +281,74 @@ func update_entities(entities: Array) -> void:
 		if not present.has(key):
 			_entity_visual_positions.erase(key)
 			_entity_target_positions.erase(key)
-	_ordered_entities = _entities.duplicate()
-	_ordered_entities.sort_custom(_sort_resources)
-	queue_redraw()
+			_entity_segment_starts.erase(key)
+			_entity_segment_elapsed.erase(key)
+			_entity_motion_amounts.erase(key)
+			_entity_stride_distances.erase(key)
+			_entity_facing.erase(key)
+	if _is_dynamic_layer:
+		_ordered_entities = _entities.duplicate()
+		_ordered_entities.sort_custom(_sort_resources)
+	else:
+		_ordered_entities.clear()
+	if _is_dynamic_layer or _active_layer == "population":
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.update_entities(_entities)
 
 
 func _process(delta: float) -> void:
 	if not _simulation_running:
 		return
 	_visual_seconds += delta
-	_animation_accumulator += delta
-	if _animation_accumulator < 0.05:
-		return
-	var animation_delta := _animation_accumulator
-	_animation_accumulator = 0.0
+	# Project rendering is capped at 60 FPS, so advancing once per rendered frame
+	# avoids cadence aliasing that can accidentally turn a 60 Hz display into 30 Hz.
 	var changed := false
 	for key: Variant in _entity_visual_positions:
 		var current: Vector2 = _entity_visual_positions[key]
 		var target: Vector2 = _entity_target_positions.get(key, current)
-		var next := current.lerp(target, minf(animation_delta * 7.5, 1.0))
-		_entity_motion_amounts[key] = next.distance_to(current) / maxf(animation_delta, 0.001)
+		if not _local_view_rect.has_point(_map_vector_to_local(target)):
+			_entity_visual_positions[key] = target
+			_entity_segment_starts[key] = target
+			_entity_segment_elapsed[key] = _movement_interval
+			_entity_motion_amounts[key] = 0.0
+			continue
+		var start: Vector2 = _entity_segment_starts.get(key, current)
+		var elapsed: float = minf(float(_entity_segment_elapsed.get(key, 0.0)) + delta, _movement_interval)
+		_entity_segment_elapsed[key] = elapsed
+		var progress := clampf(elapsed / maxf(_movement_interval, 0.001), 0.0, 1.0)
+		# Constant segment speed avoids braking to zero at every tile boundary.
+		var next := start.lerp(target, progress)
+		_entity_motion_amounts[key] = next.distance_to(current) / maxf(delta, 0.001)
 		if next.distance_squared_to(current) > 0.00001:
+			_record_visual_motion(str(key), current, next)
 			_entity_visual_positions[key] = next
 			changed = true
-	var has_active_animation := _entities.any(func(entity: Dictionary) -> bool:
-		return str(entity.get("action", "idle")).to_lower() in ["move", "wander", "patrol", "regroup", "return_home", "seek_water", "forage", "flee", "chase", "hunt", "feed", "graze", "drink", "root", "chop", "gather", "pluck", "build", "craft"]
-	)
 	var has_falling_tree := _resource_fall_started_ms.values().any(func(started: Variant) -> bool:
 		return _visual_msec() - int(started) < 900
 	)
-	if changed or has_active_animation or has_falling_tree:
+	var has_environment_motion := _wind_speed > 0.15 or _weather != "CLEAR"
+	if changed or _has_action_animation or has_falling_tree or has_environment_motion:
 		queue_redraw()
+
+
+func _record_visual_motion(entity_id: String, previous: Vector2, next: Vector2) -> void:
+	var displacement := _map_vector_to_local(next) - _map_vector_to_local(previous)
+	_entity_stride_distances[entity_id] = float(_entity_stride_distances.get(entity_id, 0.0)) + displacement.length()
+	if absf(displacement.x) > 0.001:
+		_entity_facing[entity_id] = -1.0 if displacement.x < 0.0 else 1.0
 
 
 func set_observation_layer(layer_name: String) -> void:
 	_active_layer = layer_name
 	queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.set_observation_layer(layer_name)
 
 
 func get_entity_visual_local(entity_id: String) -> Vector2:
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		return _dynamic_layer.get_entity_visual_local(entity_id)
 	var map_position: Vector2 = _entity_visual_positions.get(entity_id, Vector2.ZERO)
 	if not _entity_visual_positions.has(entity_id):
 		for entity: Dictionary in _entities:
@@ -241,25 +396,37 @@ func set_hovered_tile(map_position: Vector2i) -> void:
 	if _hovered_tile == map_position:
 		return
 	_hovered_tile = map_position
-	queue_redraw()
+	if _is_dynamic_layer:
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.set_hovered_tile(map_position)
 
 
 func set_selected_tile(map_position: Vector2i) -> void:
 	_selected_tile = map_position
-	queue_redraw()
+	if _is_dynamic_layer:
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.set_selected_tile(map_position)
 
 
 func clear_selection() -> void:
 	_selected_tile = NO_TILE
-	queue_redraw()
+	if _is_dynamic_layer:
+		queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.clear_selection()
 
 
 func set_visible_chunk_center(chunk_position: Vector2i) -> void:
 	if _visible_chunk_center == chunk_position:
 		return
 	_visible_chunk_center = chunk_position
+	_terrain_mesh_dirty = true
 	_rebuild_draw_order()
 	queue_redraw()
+	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer.set_visible_chunk_center(chunk_position)
 
 
 func get_visible_chunk_count() -> int:
@@ -270,19 +437,35 @@ func get_visible_chunk_count() -> int:
 func _draw() -> void:
 	if _tiles.is_empty():
 		return
+	_update_local_view_rect()
 
 	for coordinate: Vector2i in _ordered_coordinates:
-		if not _is_on_screen(map_to_local(coordinate), 100.0):
+		if _is_dynamic_layer and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
 			continue
-		_draw_tile(coordinate, _tiles[coordinate])
+		var tile_position := map_to_local(coordinate)
+		if not _is_on_screen(tile_position, 100.0):
+			continue
+		if _is_dynamic_layer:
+			# Scatter ambient details across patches instead of issuing identical
+			# animated grass/wave strokes on every single tile each frame.
+			_draw_dynamic_tile_effects(coordinate, _tiles[coordinate], tile_position)
+		else:
+			_draw_tile(coordinate, _tiles[coordinate], tile_position)
+
+	if not _is_dynamic_layer:
+		return
 
 	for resource: Dictionary in _ordered_resources:
 		var resource_position := Vector2i(resource["x"], resource["y"])
-		if not _is_on_screen(map_to_local(resource_position), 150.0):
+		var resource_local := map_to_local(resource_position)
+		if not _is_on_screen(resource_local, 150.0):
 			continue
-		if _draw_resource_sprite(map_to_local(resource_position), resource):
+		var resource_type := str(resource["type"]).to_lower()
+		if _draw_detail_level == 0 and resource_type in ["plant", "mushroom", "reeds", "lily", "herb"]:
 			continue
-		match str(resource["type"]).to_lower():
+		if _draw_resource_sprite(resource_local, resource):
+			continue
+		match resource_type:
 			"tree":
 				var produce_capacity: float = float(resource.get("produce_capacity", 0.0))
 				var produce_ratio: float = (
@@ -290,36 +473,40 @@ func _draw() -> void:
 					if produce_capacity > 0.0 else 0.0
 				)
 				_draw_tree(
-					map_to_local(resource_position),
+					resource_local,
 					float(resource.get("growth", 1.0)),
 					int(resource.get("variant", 0)),
 					produce_ratio
 				)
 			"stone":
-				_draw_stone(map_to_local(resource_position), float(resource.get("capacity", 100.0)), int(resource.get("variant", 0)))
+				_draw_stone(resource_local, float(resource.get("capacity", 100.0)), int(resource.get("variant", 0)))
 			"plant":
-				_draw_plant(map_to_local(resource_position), float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
+				_draw_plant(resource_local, float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
 			"bush":
-				_draw_bush(map_to_local(resource_position), float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
+				_draw_bush(resource_local, float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
 			"mushroom":
-				_draw_mushrooms(map_to_local(resource_position), int(resource.get("variant", 0)))
+				_draw_mushrooms(resource_local, int(resource.get("variant", 0)))
 			"log":
-				_draw_log(map_to_local(resource_position))
+				_draw_log(resource_local)
 			"stump":
-				_draw_stump(map_to_local(resource_position))
+				_draw_stump(resource_local)
 			"reeds":
-				_draw_reeds(map_to_local(resource_position))
+				_draw_reeds(resource_local)
 			"lily":
-				_draw_lily(map_to_local(resource_position), int(resource.get("variant", 0)))
+				_draw_lily(resource_local, int(resource.get("variant", 0)))
+			"carcass":
+				_draw_carcass(resource_local, float(resource.get("quantity", 0)), str(resource.get("visual_state", "fresh")))
 
 	for structure: Dictionary in _ordered_structures:
 		var structure_position := Vector2i(int(structure["x"]), int(structure["y"]))
-		if _is_on_screen(map_to_local(structure_position), 150.0):
-			_draw_structure(map_to_local(structure_position), structure)
+		var structure_local := map_to_local(structure_position)
+		if _is_on_screen(structure_local, 150.0):
+			_draw_structure(structure_local, structure)
 
 	for entity: Dictionary in _ordered_entities:
 		var entity_position := Vector2i(int(entity["x"]), int(entity["y"]))
-		if _is_coordinate_visible(entity_position) and _is_on_screen(map_to_local(entity_position), 150.0):
+		var entity_local := map_to_local(entity_position)
+		if _is_coordinate_visible(entity_position) and _is_on_screen(entity_local, 150.0):
 			var key := str(entity.get("id", "%s,%s" % [entity["x"], entity["y"]]))
 			var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity_position))
 			if str(entity.get("kind", "agent")).to_lower() == "animal":
@@ -331,14 +518,13 @@ func _draw() -> void:
 	_draw_highlight(_selected_tile, SELECTED_COLOR, 2.5)
 
 
-func _draw_tile(coordinate: Vector2i, tile_data: Dictionary) -> void:
-	var center := map_to_local(coordinate)
+func _draw_tile(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) -> void:
 	var diamond := _diamond_at(center)
 	var terrain := str(tile_data.get("terrain", "grass")).to_lower()
 	var variant: int = int(tile_data.get("metadata", {}).get("variant", 0))
 	var color: Color = _terrain_variant_color(TERRAIN_COLORS.get(terrain, FALLBACK_COLOR), variant)
 
-	var used_atlas_tile := _draw_terrain_sprite(center, terrain, variant, coordinate)
+	var used_atlas_tile := _terrain_mesh != null or _draw_terrain_sprite(center, terrain, variant, coordinate)
 	if not used_atlas_tile and not _tiles.has(coordinate + Vector2i(1, 0)):
 		draw_colored_polygon(PackedVector2Array([
 			diamond[1], diamond[2], diamond[2] + Vector2(0, slab_depth),
@@ -352,20 +538,49 @@ func _draw_tile(coordinate: Vector2i, tile_data: Dictionary) -> void:
 
 	if not used_atlas_tile:
 		draw_colored_polygon(diamond, color)
-	if terrain in ["water", "ocean", "wetland", "swamp", "ice"]:
-		var wave_phase := float(_visual_msec()) * 0.0018 + float(coordinate.x * 3 + coordinate.y * 5)
-		var wave_offset := sin(wave_phase) * 5.0
+	if terrain in ["water", "ocean"]:
+		_draw_shoreline(coordinate, diamond)
+	_draw_layer_overlay(coordinate, diamond, tile_data)
+	if _draw_detail_level > 1 and terrain not in ["grass", "forest", "water", "ocean", "wetland", "swamp", "ice", "savanna"] and (not used_atlas_tile or terrain in ["meadow", "volcanic"]):
+		_draw_tile_details(coordinate, center, terrain, variant)
+	if _draw_detail_level > 0 and terrain == "mountain" and posmod(coordinate.x * 19 + coordinate.y * 23, 10) < 7:
+		_draw_mountain(coordinate, center, float(tile_data.get("metadata", {}).get("elevation", 0.8)))
+
+
+func shoreline_edges(coordinate: Vector2i) -> Array[int]:
+	var edges: Array[int] = []
+	var offsets := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]
+	for index: int in range(4):
+		var neighbor: Dictionary = _tiles.get(coordinate + offsets[index], {})
+		if not neighbor.is_empty() and str(neighbor.get("terrain", "")).to_lower() not in ["water", "ocean", "wetland", "swamp", "ice"]:
+			edges.append(index)
+	return edges
+
+
+func _draw_shoreline(coordinate: Vector2i, diamond: PackedVector2Array) -> void:
+	# Cached with terrain: no per-frame shoreline scans or particle allocations.
+	for edge: int in shoreline_edges(coordinate):
+		var start := diamond[edge]
+		var end := diamond[(edge + 1) % 4]
+		draw_line(start, end, Color(0.35, 0.75, 0.77, 0.65), 5.0, true)
+		draw_line(start, end, Color(0.84, 0.94, 0.83, 0.7), 1.2, true)
+
+
+func _draw_dynamic_tile_effects(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) -> void:
+	var terrain := str(tile_data.get("terrain", "grass")).to_lower()
+	var variant: int = int(tile_data.get("metadata", {}).get("variant", 0))
+	if _draw_detail_level > 0 and terrain in ["water", "ocean", "wetland", "swamp", "ice"]:
+		var wave_phase := float(_visual_msec()) * (0.0013 + _wind_speed * 0.00008) + float(coordinate.x * 3 + coordinate.y * 5)
+		var wave_offset := sin(wave_phase) * (3.0 + minf(_wind_speed, 14.0) * 0.32)
+		var wave_push := _wind_vector() * minf(_wind_speed, 12.0) * 0.3
 		draw_line(
-			center + Vector2(-13 + wave_offset, -2),
-			center + Vector2(-2 + wave_offset, -2),
+			center + Vector2(-13 + wave_offset, -2) + wave_push,
+			center + Vector2(-2 + wave_offset, -2) + wave_push,
 			Color(0.78, 0.94, 1.0, 0.38),
 			1.2
 		)
-	_draw_layer_overlay(coordinate, diamond, tile_data)
-	if not used_atlas_tile or terrain in ["meadow", "swamp", "savanna", "volcanic"]:
+	if _draw_detail_level > 1 and terrain in ["grass", "forest", "wetland", "swamp", "savanna"]:
 		_draw_tile_details(coordinate, center, terrain, variant)
-	if terrain == "mountain" and posmod(coordinate.x * 19 + coordinate.y * 23, 10) < 7:
-		_draw_mountain(coordinate, center, float(tile_data.get("metadata", {}).get("elevation", 0.8)))
 
 
 func _draw_terrain_sprite(center: Vector2, terrain: String, variant: int, coordinate: Vector2i) -> bool:
@@ -459,7 +674,8 @@ func _draw_tile_details(coordinate: Vector2i, center: Vector2, terrain: String, 
 			if detail_seed < 5:
 				var blade_color := Color("168e4c") if terrain == "grass" else Color("087a43")
 				for offset: Vector2 in [Vector2(-12, 3), Vector2(-7, 5), Vector2(9, 2)]:
-					draw_line(center + offset, center + offset + Vector2(2, -5), blade_color, 1.2)
+					var blade_push := _wind_vector() * _gust(center + offset, 2.0) * 2.4
+					draw_line(center + offset, center + offset + Vector2(2, -5) + blade_push, blade_color, 1.2)
 			if detail_seed == 7:
 				var flower_colors: Array[Color] = [Color("f5d76e"), Color("ef7f91"), Color("c69af1"), Color("f4f0e6")]
 				var flower_color: Color = flower_colors[variant]
@@ -483,7 +699,8 @@ func _draw_tile_details(coordinate: Vector2i, center: Vector2, terrain: String, 
 		"wetland":
 			if detail_seed < 5:
 				for offset_x: float in [-10.0, -5.0, 8.0]:
-					draw_line(center + Vector2(offset_x, 5), center + Vector2(offset_x + 2, -4), Color("356c45"), 1.4)
+					var reed_push := _wind_vector() * _gust(center + Vector2(offset_x, 0), 2.5) * 3.2
+					draw_line(center + Vector2(offset_x, 5), center + Vector2(offset_x + 2, -4) + reed_push, Color("356c45"), 1.4)
 		"swamp":
 			if detail_seed < 4:
 				draw_circle(center + Vector2(-7, 1), 3.0, Color("477d57"))
@@ -569,6 +786,8 @@ func _draw_highlight(coordinate: Vector2i, color: Color, width: float) -> void:
 
 
 func _draw_tree(tile_center: Vector2, growth: float, variant: int, produce_ratio: float) -> void:
+	var wind_displacement := _wind_vector() * _gust(tile_center, 1.4) * 2.2 * growth
+	tile_center += wind_displacement
 	if variant == 1:
 		_draw_conifer(tile_center, growth)
 		return
@@ -673,18 +892,19 @@ func _draw_plant(tile_center: Vector2, growth: float, variant: int) -> void:
 	var base := tile_center + Vector2(0, 1)
 	var height := 4.0 + 9.0 * growth
 	var spread := 3.0 + 6.0 * growth
-	draw_line(base, base + Vector2(0, -height), Color("356b2f"), 2.0)
+	var tip_push := _wind_vector() * _gust(tile_center, 2.8) * 3.2 * growth
+	draw_line(base, base + Vector2(0, -height) + tip_push, Color("356b2f"), 2.0)
 	draw_colored_polygon(PackedVector2Array([
-		base + Vector2(0, -height), base + Vector2(spread, -height + 3),
-		base + Vector2(0, -height + 6), base + Vector2(-spread, -height + 3)
+		base + Vector2(0, -height) + tip_push, base + Vector2(spread, -height + 3) + tip_push,
+		base + Vector2(0, -height + 6) + tip_push, base + Vector2(-spread, -height + 3) + tip_push
 	]), Color("65bd4f"))
 	var flower_colors: Array[Color] = [Color("f3c85b"), Color("e87991"), Color("b98ce8"), Color("f2eee2")]
-	draw_circle(base + Vector2(0, -height - 1), 2.2 + growth, flower_colors[variant])
+	draw_circle(base + Vector2(0, -height - 1) + tip_push, 2.2 + growth, flower_colors[variant])
 
 
 func _draw_bush(tile_center: Vector2, growth: float, variant: int) -> void:
 	var radius: float = 6.0 + growth * 5.0
-	var base := tile_center + Vector2(0, 1)
+	var base := tile_center + Vector2(0, 1) + _wind_vector() * _gust(tile_center, 1.7) * 1.8
 	var bush_color := Color("2d9a4f") if variant % 2 == 0 else Color("3baa55")
 	draw_circle(base + Vector2(-8, -5), radius, bush_color.darkened(0.12))
 	draw_circle(base + Vector2(7, -6), radius * 0.95, bush_color.darkened(0.05))
@@ -727,8 +947,9 @@ func _draw_stump(tile_center: Vector2) -> void:
 func _draw_reeds(tile_center: Vector2) -> void:
 	for offset_x: float in [-9.0, -4.0, 1.0, 6.0, 11.0]:
 		var height: float = 12.0 + fmod(abs(offset_x) * 2.0, 7.0)
-		draw_line(tile_center + Vector2(offset_x, 5), tile_center + Vector2(offset_x + 2, 5 - height), Color("47783b"), 1.8)
-		draw_line(tile_center + Vector2(offset_x + 2, 5 - height), tile_center + Vector2(offset_x + 5, 8 - height), Color("78a94c"), 1.5)
+		var push := _wind_vector() * _gust(tile_center + Vector2(offset_x, 0), 3.2) * 4.0
+		draw_line(tile_center + Vector2(offset_x, 5), tile_center + Vector2(offset_x + 2, 5 - height) + push, Color("47783b"), 1.8)
+		draw_line(tile_center + Vector2(offset_x + 2, 5 - height) + push, tile_center + Vector2(offset_x + 5, 8 - height) + push, Color("78a94c"), 1.5)
 
 
 func _draw_lily(tile_center: Vector2, variant: int) -> void:
@@ -745,114 +966,143 @@ func _draw_lily(tile_center: Vector2, variant: int) -> void:
 func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 	var progress: float = float(structure.get("progress_ratio", 0.0))
 	var completed: bool = bool(structure.get("completed", false))
+	var funded: bool = bool(structure.get("funded", true))
 	var base := tile_center + Vector2(0, 2)
-	draw_colored_polygon(PackedVector2Array([
-		base + Vector2(0, -7), base + Vector2(22, 1),
-		base + Vector2(0, 10), base + Vector2(-22, 1)
-	]), Color("8b6847"))
-	if not completed:
-		var beam_height: float = 8.0 + progress * 20.0
-		draw_line(base + Vector2(-14, 0), base + Vector2(-14, -beam_height), Color("74482a"), 4.0)
-		draw_line(base + Vector2(14, 0), base + Vector2(14, -beam_height), Color("74482a"), 4.0)
-		if progress >= 0.25:
-			draw_line(base + Vector2(-14, -beam_height), base + Vector2(14, -beam_height), Color("bb915c"), 4.0)
-		if progress >= 0.5:
-			for board: int in range(4):
-				var board_y := -4.0 - board * 5.0
-				draw_line(base + Vector2(-13, board_y), base + Vector2(13, board_y), Color("9d764a"), 3.0)
-		if progress >= 0.75:
-			draw_line(base + Vector2(-18, -beam_height), base + Vector2(0, -beam_height - 14), Color("d2ae73"), 3.0)
-			draw_line(base + Vector2(0, -beam_height - 14), base + Vector2(18, -beam_height), Color("d2ae73"), 3.0)
-		draw_rect(Rect2(base + Vector2(-20, 12), Vector2(40, 3)), Color("263b32"))
-		draw_rect(Rect2(base + Vector2(-20, 12), Vector2(40 * clampf(progress, 0, 1), 3)), Color("dbbd80"))
-		return
-	# Reuse the detailed world atlas rather than UI thumbnail stand-ins.
 	var kind := str(structure.get("structure_type", "shelter")).to_lower()
-	if kind == "farm":
-		var growth: float = float(structure.get("crop_growth", 0.0))
-		var ripe: bool = float(structure.get("crop_food", 0.0)) > 0.0
-		for row: int in range(3):
-			for column: int in range(4):
-				var sprout := base + Vector2((column - row) * 6 - 3, (column + row) * 3 - 8)
-				draw_line(sprout, sprout + Vector2(0, -3 - growth * 8), Color("d7b85c") if ripe else Color("70a84c"), 2.0)
+	if kind == "road":
+		var road_color := Color("a89a79") if completed else Color("6f6655")
+		draw_colored_polygon(_diamond_at(tile_center), Color(road_color, 0.8))
+		for stone_index: int in range(5 if completed else maxi(1, int(progress * 5))):
+			var stone_center := tile_center + Vector2((stone_index % 3 - 1) * 13, (stone_index / 3) * 9 - 4)
+			draw_line(stone_center - Vector2(4, 0), stone_center + Vector2(4, 0), Color("d6c8a5"), 3.0)
+		return
+	if not completed:
+		_draw_construction_site(base, structure, kind, progress, funded)
 		return
 	if kind in ["campfire", "torch"] and float(structure.get("fuel", 0.0)) <= 0.0:
-		draw_line(base + Vector2(-9, -3), base + Vector2(9, 2), Color("55483d"), 4.0)
-		draw_line(base + Vector2(-9, 2), base + Vector2(9, -3), Color("55483d"), 4.0)
+		for angle: int in range(0, 360, 45):
+			var stone := base + Vector2.from_angle(deg_to_rad(angle)) * Vector2(13, 6)
+			draw_circle(stone, 4.0, Color("747778"))
+		draw_line(base + Vector2(-9, -4), base + Vector2(9, 2), Color("55483d"), 4.0)
+		draw_line(base + Vector2(-9, 2), base + Vector2(9, -4), Color("55483d"), 4.0)
 		return
-	var regions := {
-		"storage": Rect2(639, 610, 309, 230),
-		"workbench": Rect2(966, 625, 269, 213),
-		"campfire": Rect2(18, 650, 142, 151),
-		"fence": Rect2(329, 662, 307, 153)
-	}
-	if _environment_atlas != null and regions.has(kind):
-		var region: Rect2 = regions[kind]
-		var sprite_height := 70.0 if kind in ["storage", "workbench"] else 42.0
-		var sprite_width := sprite_height * region.size.x / region.size.y
-		draw_texture_rect_region(_environment_atlas, Rect2(base + Vector2(-sprite_width / 2, -sprite_height + 6), Vector2(sprite_width, sprite_height)), region)
+	if _draw_buildable_sprite(base, kind):
+		if kind == "campfire":
+			_draw_fire_physics(base + Vector2(0, -13), float(structure.get("fuel", 0.0)))
+		elif kind == "farm":
+			_draw_crop_motion(base, structure)
 		return
+	if kind == "torch":
+		draw_line(base, base + Vector2(0, -31), Color("694328"), 4.0)
+		_draw_fire_physics(base + Vector2(0, -36), float(structure.get("fuel", 0.0)))
 
-	match str(structure.get("structure_type", "shelter")).to_lower():
-		"campfire":
-			draw_line(base + Vector2(-10, 2), base + Vector2(10, -2), Color("55331f"), 4.0)
-			draw_line(base + Vector2(-10, -2), base + Vector2(10, 2), Color("55331f"), 4.0)
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(0, -23), base + Vector2(9, -4),
-				base + Vector2(0, 1), base + Vector2(-8, -5)
-			]), Color("f28c28"))
-		"storage":
-			draw_rect(Rect2(base + Vector2(-14, -20), Vector2(28, 22)), Color("98613a"))
-			draw_line(base + Vector2(-14, -9), base + Vector2(14, -9), Color("d59a57"), 3.0)
-		"tent":
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(-24, 3), base + Vector2(0, -36),
-				base + Vector2(24, 3), base + Vector2(0, -5)
-			]), Color("d7b27a"))
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(0, -36), base + Vector2(24, 3),
-				base + Vector2(0, -5)
-			]), Color("a67850"))
-			draw_line(base + Vector2(0, -38), base + Vector2(0, 5), Color("68442d"), 2.0)
-		"workbench":
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(-22, -15), base + Vector2(13, -20),
-				base + Vector2(23, -13), base + Vector2(-12, -8)
-			]), Color("b77a43"))
-			draw_line(base + Vector2(-14, -9), base + Vector2(-14, 4), Color("674127"), 5.0)
-			draw_line(base + Vector2(16, -14), base + Vector2(16, 1), Color("674127"), 5.0)
-			draw_line(base + Vector2(-4, -15), base + Vector2(7, -17), Color("8a9aa1"), 3.0)
-		"well":
-			draw_circle(base + Vector2(0, -4), 17.0, Color("6f7d83"))
-			draw_circle(base + Vector2(0, -6), 11.0, Color("203b48"))
-			draw_line(base + Vector2(-15, -5), base + Vector2(-15, -34), Color("70462b"), 4.0)
-			draw_line(base + Vector2(15, -5), base + Vector2(15, -34), Color("70462b"), 4.0)
-			draw_line(base + Vector2(-18, -33), base + Vector2(18, -33), Color("8f5c35"), 5.0)
-		"torch":
-			draw_line(base, base + Vector2(0, -31), Color("694328"), 4.0)
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(0, -45), base + Vector2(7, -31),
-				base + Vector2(0, -26), base + Vector2(-7, -32)
-			]), Color("f19a32"))
-			draw_circle(base + Vector2(0, -35), 4.0, Color("ffd85a"))
-		"fence":
-			draw_line(base + Vector2(-24, -8), base + Vector2(24, -14), Color("83522e"), 5.0)
-			draw_line(base + Vector2(-24, 1), base + Vector2(24, -5), Color("9d6638"), 5.0)
-			draw_line(base + Vector2(-18, 5), base + Vector2(-18, -21), Color("654026"), 5.0)
-			draw_line(base + Vector2(18, 0), base + Vector2(18, -25), Color("654026"), 5.0)
-		_:
-			var roof_peak := base + Vector2(0, -42)
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(-21, -16), roof_peak, base + Vector2(21, -16), base + Vector2(0, -5)
-			]), Color("795035"))
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(-17, -16), base + Vector2(0, -5),
-				base + Vector2(0, 5), base + Vector2(-17, 0)
-			]), Color("b68450"))
-			draw_colored_polygon(PackedVector2Array([
-				base + Vector2(0, -5), base + Vector2(17, -16),
-				base + Vector2(17, 0), base + Vector2(0, 5)
-			]), Color("8d623e"))
+
+func _draw_construction_site(base: Vector2, structure: Dictionary, kind: String, progress: float, funded: bool) -> void:
+	var required: Dictionary = structure.get("materials_required", {})
+	var delivered: Dictionary = structure.get("materials_delivered", {})
+	var required_total := 0.0
+	var delivered_total := 0.0
+	for material: String in required:
+		required_total += float(required[material])
+		delivered_total += minf(float(required[material]), float(delivered.get(material, 0.0)))
+	var supply_ratio := delivered_total / maxf(required_total, 1.0)
+	var stage := clampf(progress, 0.0, 1.0)
+	# A stone footing stays visible throughout construction and anchors the site.
+	draw_colored_polygon(PackedVector2Array([
+		base + Vector2(0, -7), base + Vector2(27, 1),
+		base + Vector2(0, 11), base + Vector2(-27, 1)
+	]), Color("6e716d"))
+	for stone_index: int in range(6):
+		var stone_at := base + Vector2(-19 + stone_index * 8, -2 + (stone_index % 2) * 5)
+		draw_line(stone_at, stone_at + Vector2(6, 2), Color("a8aaa2"), 2.5)
+	# Delivered materials are physical piles, not a decorative completion badge.
+	for pile: int in range(ceili(supply_ratio * 5.0)):
+		var pile_at := base + Vector2(-31 + pile * 8, 7 - (pile % 2) * 4)
+		draw_line(pile_at, pile_at + Vector2(9, -3), Color("a66c3b"), 4.0)
+		draw_circle(pile_at + Vector2(9, -3), 2.0, Color("d2a46c"))
+	if funded and stage > 0.0 and _buildables_atlas != null:
+		var source := _buildable_region(kind)
+		if source.size.x > 0.0:
+			var destination := _buildable_destination(base, kind, source)
+			var visible_height := maxf(1.0, source.size.y * stage)
+			var source_slice := Rect2(source.position + Vector2(0, source.size.y - visible_height), Vector2(source.size.x, visible_height))
+			var destination_slice := Rect2(destination.position + Vector2(0, destination.size.y * (1.0 - stage)), Vector2(destination.size.x, destination.size.y * stage))
+			draw_texture_rect_region(_buildables_atlas, destination_slice, source_slice, Color(1, 1, 1, 0.92))
+	# Scaffolding communicates the current physical stage without replacing it.
+	if funded:
+		var beam_height := 15.0 + stage * 49.0
+		for side: float in [-1.0, 1.0]:
+			draw_line(base + Vector2(side * 31, 4), base + Vector2(side * 31, -beam_height), Color("795033"), 3.0)
+		draw_line(base + Vector2(-33, -beam_height), base + Vector2(33, -beam_height), Color("b8844f"), 3.0)
+		if stage > 0.35:
+			draw_line(base + Vector2(-31, -8), base + Vector2(31, -beam_height + 4), Color("9a693e"), 2.0)
+	else:
+		draw_dashed_line(base + Vector2(-28, -10), base + Vector2(28, -10), Color("72d6bb"), 1.5, 5.0)
+	draw_rect(Rect2(base + Vector2(-28, 15), Vector2(56, 4)), Color("1b302e"))
+	var shown_progress := stage if funded else supply_ratio
+	draw_rect(Rect2(base + Vector2(-27, 16), Vector2(54 * shown_progress, 2)), Color("dbbd80") if funded else Color("e6a25a"))
+
+
+func _draw_buildable_sprite(base: Vector2, kind: String, modulate := Color.WHITE) -> bool:
+	if _buildables_atlas == null:
+		return false
+	var source := _buildable_region(kind)
+	if source.size.x <= 0.0:
+		return false
+	draw_texture_rect_region(_buildables_atlas, _buildable_destination(base, kind, source), source, modulate)
+	return true
+
+
+func _buildable_region(kind: String) -> Rect2:
+	var indexes := {
+		"shelter": 0, "house": 0, "home": 0, "tent": 1,
+		"storage": 2, "campfire": 3, "workbench": 4,
+		"well": 5, "farm": 6, "fence": 7
+	}
+	if _buildables_atlas == null or not indexes.has(kind):
+		return Rect2()
+	var index: int = int(indexes[kind])
+	var cell := Vector2(_buildables_atlas.get_size()) / Vector2(4, 2)
+	return Rect2(Vector2(index % 4, index / 4) * cell, cell)
+
+
+func _buildable_destination(base: Vector2, kind: String, source: Rect2) -> Rect2:
+	var height: float = {
+		"shelter": 104.0, "house": 104.0, "home": 104.0,
+		"tent": 82.0, "storage": 88.0, "campfire": 48.0,
+		"workbench": 65.0, "well": 84.0, "farm": 62.0, "fence": 54.0
+	}.get(kind, 82.0) as float
+	var width := height * source.size.x / maxf(source.size.y, 1.0)
+	return Rect2(base + Vector2(-width * 0.5, -height + 8.0), Vector2(width, height))
+
+
+func _draw_crop_motion(base: Vector2, structure: Dictionary) -> void:
+	var growth := clampf(float(structure.get("crop_growth", 1.0)), 0.0, 1.0)
+	var ripe := float(structure.get("crop_food", 0.0)) > 0.0
+	for index: int in range(5):
+		var stem := base + Vector2(-18 + index * 9, -12 + (index % 2) * 4)
+		var push := _wind_vector() * _gust(stem, 2.0) * (1.0 + growth * 2.0)
+		draw_line(stem, stem + Vector2(0, -4 - growth * 8) + push, Color("d7b85c") if ripe else Color("70a84c"), 1.5)
+
+
+func _draw_fire_physics(origin: Vector2, fuel: float) -> void:
+	if fuel <= 0.0:
+		return
+	var gust := _gust(origin, 1.8)
+	var push := _wind_vector() * (3.0 + _wind_speed * 0.32) * gust
+	var flicker := 1.0 + sin(_visual_seconds * 13.0 + origin.x * 0.03) * 0.18
+	# Keep the flame convex even during a strong crosswind. A four-point flame can
+	# fold over itself and fail Godot's polygon triangulation at high gust values.
+	draw_colored_polygon(PackedVector2Array([
+		origin + Vector2(-5, 3),
+		origin + Vector2(0, -15 * flicker) + push,
+		origin + Vector2(6, 3)
+	]), Color(1.0, 0.45, 0.08, 0.78))
+	draw_circle(origin + Vector2(0, -2), 3.2 * flicker, Color(1.0, 0.86, 0.28, 0.88))
+	for index: int in range(3):
+		var age := fmod(_visual_seconds * (0.55 + index * 0.08) + index * 0.31, 1.0)
+		var smoke := origin + Vector2(0, -14) + _wind_vector() * age * (12.0 + _wind_speed) + Vector2(0, -age * 22.0)
+		draw_circle(smoke, 2.0 + age * 3.5, Color(0.38, 0.42, 0.42, (1.0 - age) * 0.28))
 
 
 func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
@@ -867,7 +1117,7 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 	var animal_atlas := _wildlife_atlas_2 if str(species_animations.get("atlas", "primary")) == "secondary" else _wildlife_atlas
 	if animal_atlas == null:
 		return
-	var moving := action in ["move", "wander", "patrol", "regroup", "return_home", "seek_water", "forage", "flee", "chase", "hunt"]
+	var moving := action in ["move", "wander", "patrol", "regroup", "return_home", "seek_water", "seek_weather_shelter", "forage", "flee", "chase", "hunt", "migrate", "follow_parent"]
 	var has_motion := _simulation_running and float(_entity_motion_amounts.get(str(entity.get("id", "")), 0.0)) > 0.04
 	if moving and not has_motion:
 		action = "idle"
@@ -882,8 +1132,11 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 		return
 	var time_seconds := _visual_seconds
 	var playback_rate := 1.35 if action == "flee" else (1.15 if action == "hunt" else 1.0)
-	var phase := time_seconds * playback_rate
-	var frame_index := int(floor(phase * ANIMATION_FPS)) % frames.size()
+	var entity_id := str(entity.get("id", ""))
+	var phase := time_seconds * playback_rate + float(posmod(entity_id.hash(), 101)) / 17.0
+	if moving:
+		phase = float(_entity_stride_distances.get(entity_id, 0.0)) / 48.0 * 0.8
+	var frame_index := animation_frame(phase, frames.size(), 0.8 if moving else 1.6)
 	var values: Array = frames[frame_index]
 	if values.size() != 4:
 		return
@@ -898,17 +1151,27 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 	var bob := sin(phase * 2.0) * (2.6 if action == "flee" else (1.6 if moving else 0.35))
 	if action in ["graze", "drink", "root", "feed"]:
 		bob = abs(sin(phase * 1.7)) * 2.2
-	var base := tile_center + Vector2(0, 5.0 + bob)
+	var weather_shiver := sin(_visual_seconds * 18.0 + tile_center.x) * 0.8 if _temperature_c < 3.0 else 0.0
+	# Wind may animate foliage; grounded animals must not slide off their feet.
+	var base := tile_center + Vector2(weather_shiver, 5.0 + bob)
 	draw_colored_polygon(PackedVector2Array([
 		base + Vector2(-width * 0.28, -2), base + Vector2(0, -6),
 		base + Vector2(width * 0.28, -2), base + Vector2(0, 3)
 	]), Color(0.0, 0.0, 0.0, 0.22))
+	draw_set_transform(base, 0.0, Vector2(float(_entity_facing.get(entity_id, 1.0)), 1.0))
 	draw_texture_rect_region(
 		animal_atlas,
-		Rect2(base + Vector2(-width * 0.5, -height + 4.0), Vector2(width, height)),
+		Rect2(Vector2(-width * 0.5, -height + 4.0), Vector2(width, height)),
 		source
 	)
-	if action in ["graze", "drink", "root", "feed", "hunt", "sleep"]:
+	draw_set_transform(Vector2.ZERO)
+	if action == "sleep":
+		var rise := fposmod(phase * 0.45, 1.0)
+		draw_string(ThemeDB.fallback_font, base + Vector2(8, -height - rise * 13), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.85, 1.0, 1.0 - rise))
+	elif action == "drink" and _draw_detail_level > 0:
+		var ripple := fposmod(phase, 1.0)
+		draw_arc(base + Vector2(10, -2), 3 + ripple * 10, 0, TAU, 16, Color(0.6, 0.88, 1.0, (1 - ripple) * 0.55), 1.0)
+	if action in ["graze", "drink", "root", "feed", "hunt", "sleep", "ruminate", "groom", "preen"]:
 		var feedback_color := {
 			"graze": Color("7ee0a4"), "drink": Color("70c8e8"),
 			"root": Color("c58b58"), "feed": Color("e88962"),
@@ -917,13 +1180,30 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 		draw_circle(base + Vector2(0, -height - 2), 3.0 + sin(phase) * 0.6, feedback_color)
 
 
+func _draw_carcass(tile_center: Vector2, quantity: float, state: String) -> void:
+	var scale_factor := clampf(quantity / 18.0, 0.45, 1.2)
+	var color := Color("6f4235") if state == "fresh" else Color("665c4e")
+	var base := tile_center + Vector2(0, 4)
+	draw_colored_polygon(PackedVector2Array([
+		base + Vector2(-15, -3) * scale_factor,
+		base + Vector2(-7, -10) * scale_factor,
+		base + Vector2(11, -8) * scale_factor,
+		base + Vector2(16, 0) * scale_factor,
+		base + Vector2(3, 4) * scale_factor,
+		base + Vector2(-11, 3) * scale_factor
+	]), color)
+	draw_circle(base + Vector2(11, -6) * scale_factor, 3.5 * scale_factor, color.lightened(0.08))
+
+
 func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
+	if bool(entity.get("indoors", false)) and str(entity.get("action", "")) == "sleep":
+		return # Residents remain inspectable, but the roof hides the sleeping sprite.
 	var action := str(entity.get("action", "idle")).to_lower()
 	var action_target: Dictionary = entity.get("action_target", {})
 	if action in ["gather", "chop", "pluck"] and action_target.has("x") and action_target.has("y"):
 		var at_interaction_tile := (
-			int(entity.get("x", 0)) == int(action_target["x"])
-			and int(entity.get("y", 0)) == int(action_target["y"])
+			absi(int(entity.get("x", 0)) - int(action_target["x"])) <= 1
+			and absi(int(entity.get("y", 0)) - int(action_target["y"])) <= 1
 		)
 		if not at_interaction_tile:
 			action = "move"
@@ -935,10 +1215,13 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 	if action == "move" and float(_entity_motion_amounts.get(entity_key, 0.0)) <= 0.04:
 		action = "idle"
 	var phase := _visual_seconds + float(abs(str(entity.get("id", "")).hash()) % 19)
+	if action == "move":
+		phase = float(_entity_stride_distances.get(entity_key, 0.0)) / 40.0 * 0.8
 	# Keep the walking cycle while carrying; the carry atlas has only one pose.
 	var working := action in ["chop", "gather", "pluck", "mine", "build", "craft"]
-	var bob := sin(phase * (1.8 if working else 0.65)) * (1.8 if working else 0.6)
-	var base := tile_center + Vector2(0, 3 + bob)
+	var bob := 0.0 if action == "sleep" else sin(phase * (1.8 if working else 0.65)) * (1.8 if working else 0.6)
+	var weather_shiver := sin(_visual_seconds * 19.0 + tile_center.y) * 0.75 if _temperature_c < 3.0 else 0.0
+	var base := tile_center + Vector2(weather_shiver, 3 + bob)
 	var is_player: bool = "player" in entity.get("tags", [])
 	var accent := Color("5de4c1") if is_player else Color("e0b868")
 	# The source sprite supplies the character; code adds only world-space feedback.
@@ -946,11 +1229,30 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 		base + Vector2(0, -2), base + Vector2(13, 2),
 		base + Vector2(0, 7), base + Vector2(-13, 2)
 	]), Color(0.0, 0.0, 0.0, 0.28))
-	_draw_agent_sprite(base, action, phase)
+	var facing := float(_entity_facing.get(entity_key, 1.0))
+	if working and action_target.has("x") and action_target.has("y"):
+		var contact := map_to_local(Vector2i(int(action_target["x"]), int(action_target["y"])))
+		if absf(contact.x - base.x) > 1:
+			facing = signf(contact.x - base.x)
+	draw_set_transform(base, 0.0, Vector2(facing, 1.0))
+	var inventory: Dictionary = entity.get("inventory", {}) if entity.get("inventory") is Dictionary else {}
+	var items: Dictionary = inventory.get("items", {})
+	var carrying_wood := action == "move" and float(items.get("wood", 0)) > 0
+	_draw_agent_sprite(Vector2.ZERO, "carry" if carrying_wood else action, phase, str(entity.get("avatar_id", "scout")))
+	if action == "move" and not carrying_wood:
+		_draw_carried_material(entity)
+	draw_set_transform(Vector2.ZERO)
+	if action == "sleep":
+		var sleep_phase := fposmod(_visual_seconds * 0.55, 1.0)
+		draw_string(ThemeDB.fallback_font, base + Vector2(14 + sleep_phase * 6.0, -47 - sleep_phase * 10.0), "Z", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.9, 1.0, 1.0 - sleep_phase * 0.65))
+	if action == "socialize":
+		for dot: int in range(3):
+			draw_circle(base + Vector2(-7 + dot * 7, -74 + sin(_visual_seconds * 3 + dot) * 2), 2.0, Color("e8dfbd"))
 	if is_player:
 		draw_arc(base + Vector2(0, -12), 18.0, 0.0, TAU, 28, Color(accent, 0.72), 1.6)
 		draw_string(ThemeDB.fallback_font, base + Vector2(-42, -76), str(entity.get("name", "AITIZEN")), HORIZONTAL_ALIGNMENT_CENTER, 84, 10, Color("e8f6f1"))
 	if working:
+		_draw_work_feedback(entity, action, phase)
 		var action_color := {
 			"chop": Color("e6a25a"),
 			"gather": Color("77c98d"),
@@ -964,6 +1266,62 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 		draw_rect(Rect2(base + Vector2(-16, -63), Vector2(32 * progress, 2)), action_color)
 
 
+func _draw_carried_material(entity: Dictionary) -> void:
+	# Visible cargo follows the same transform as its carrier and uses real stock.
+	var inventory: Dictionary = entity.get("inventory", {}) if entity.get("inventory") is Dictionary else {}
+	var items: Dictionary = inventory.get("items", {})
+	if float(items.get("wood", 0)) > 0:
+		for index: int in range(mini(3, ceili(float(items["wood"]) / 5.0))):
+			var start := Vector2(-17, -26 - index * 4)
+			draw_line(start, start + Vector2(20, 5), Color("845333"), 4)
+			draw_circle(start + Vector2(20, 5), 2, Color("cfa873"))
+	elif float(items.get("stone", 0)) > 0:
+		if _environment_atlas != null:
+			draw_texture_rect_region(_environment_atlas, Rect2(-17, -32, 19, 20), Rect2(13, 483, 122, 128))
+	elif float(items.get("food", 0)) + float(items.get("fruit", 0)) >= 3:
+		# Small snacks remain in the backpack; a real load uses the painted basket.
+		var basket := preload("res://assets/pixel_art/aitizen_realm_atlas_v1_clean.png")
+		draw_texture_rect_region(basket, Rect2(-17, -33, 24, 24), Rect2(179, 687, 121, 111))
+
+
+func work_effect_origin(entity: Dictionary) -> Variant:
+	var target: Dictionary = entity.get("action_target", {})
+	var resource: Dictionary = _effect_resources.get(str(target.get("resource_id", "")), {})
+	if resource.is_empty():
+		return null
+	var source := Vector2i(int(entity.get("x", 0)), int(entity.get("y", 0)))
+	var destination := Vector2i(int(resource.get("x", 0)), int(resource.get("y", 0)))
+	if absi(source.x - destination.x) > 1 or absi(source.y - destination.y) > 1:
+		return null
+	return map_to_local(destination)
+
+
+func _draw_work_feedback(entity: Dictionary, action: String, phase: float) -> void:
+	if _draw_detail_level < 1 or action not in ["chop", "mine", "gather", "pluck"]:
+		return
+	var origin_value: Variant = work_effect_origin(entity)
+	if origin_value == null:
+		return
+	var origin: Vector2 = origin_value
+	if action == "pluck":
+		# Fruit travels from the actual canopy to the citizen's hand, not from empty air.
+		var hand := map_to_local(Vector2i(int(entity.get("x", 0)), int(entity.get("y", 0)))) + Vector2(0, -30)
+		var travel := fposmod(phase / 1.2, 1.0)
+		var fruit := (origin + Vector2(0, -62)).lerp(hand, travel)
+		fruit.y -= sin(travel * PI) * 9
+		draw_circle(fruit, 2.5, Color("d66a49"))
+		draw_line(fruit + Vector2(0, -2), fruit + Vector2(1, -5), Color("648e45"), 1)
+		return
+	var tint := Color("d8ab70") if action == "chop" else Color("c4cbd0")
+	if action in ["gather", "pluck"]:
+		tint = Color("9fce78")
+	# Fixed-cost world-space flecks; no particles/nodes allocated per frame.
+	for index: int in range(4):
+		var age := fposmod(phase * 1.25 + float(index) * 0.23, 1.0)
+		var offset := Vector2((float(index) - 1.5) * age * 13.0, -sin(age * PI) * 15.0)
+		draw_circle(origin + Vector2(0, -8) + offset, 1.6 - age * 0.7, Color(tint, (1.0 - age) * 0.85))
+
+
 func _map_vector_to_local(map_position: Vector2) -> Vector2:
 	return Vector2(
 		(map_position.x - map_position.y) * tile_width * 0.5,
@@ -971,25 +1329,46 @@ func _map_vector_to_local(map_position: Vector2) -> Vector2:
 	)
 
 
-func _draw_agent_sprite(base: Vector2, action: String, phase: float) -> void:
+static func animation_frame(seconds: float, frame_count: int, cycle_seconds: float) -> int:
+	if frame_count <= 1:
+		return 0
+	# Sample at 24 Hz without speeding up short source sequences.
+	var sampled_time := floorf(seconds * ANIMATION_FPS) / ANIMATION_FPS
+	return int(floorf(fposmod(sampled_time, maxf(cycle_seconds, 0.1)) / maxf(cycle_seconds, 0.1) * frame_count)) % frame_count
+
+
+func _draw_agent_sprite(base: Vector2, action: String, phase: float, avatar_id := "scout") -> void:
+	var identity_frames := CitizenVisuals.action_frames(avatar_id, action)
+	if not identity_frames.is_empty():
+		var cycle := 0.8 if action in ["move", "carry", "walk", "run"] else 2.4 if action in ["sleep", "rest", "idle"] else 1.2
+		var frame: Array = identity_frames[animation_frame(phase, identity_frames.size(), cycle)]
+		var ratio := CitizenVisuals.scale_for(avatar_id, action)
+		var source := Rect2(frame[0], frame[1], frame[2], frame[3])
+		var destination := Rect2(base + Vector2(float(frame[4]), -float(frame[3])) * ratio, source.size * ratio)
+		draw_texture_rect_region(CitizenVisuals.texture(avatar_id, action), destination, source)
+		return
+	var resolved_avatar := avatar_id if avatar_id in CITIZEN_AVATAR_ORDER else "scout"
+	var tint: Color = Color.WHITE if resolved_avatar == "scout" else Color.WHITE.lerp(CITIZEN_AVATAR_TINTS[resolved_avatar], 0.5)
+	if action in ["sleep", "rest"]:
+		var sleep_texture := preload("res://assets/pixel_art/citizen_sleep_v2_12f.png")
+		var cell := Vector2(sleep_texture.get_size()) / Vector2(4, 3)
+		var frame := animation_frame(phase, 12, 2.4)
+		var source := Rect2(Vector2(frame % 4, floori(float(frame) / 4.0)) * cell, cell)
+		draw_texture_rect_region(sleep_texture, Rect2(base + Vector2(-32, -37), Vector2(64, 43)), source, tint)
+		return
 	if _sprite_atlas == null or _agent_sprite_regions.is_empty():
 		return
 	var animation_key := action if _agent_sprite_regions.has(action) else "idle"
+	if action in ["walk", "run"]:
+		animation_key = "move"
 	var frames: Array = _agent_sprite_regions.get(animation_key, [])
 	if frames.is_empty():
 		return
-	var frame_index := int(floor(phase * ANIMATION_FPS)) % frames.size()
+	var frame_index := animation_frame(phase, frames.size(), 0.8 if animation_key == "move" else 1.2)
 	var values: Array = frames[frame_index]
-	if values.size() != 4:
-		return
-	var source_rect := Rect2(float(values[0]), float(values[1]), float(values[2]), float(values[3]))
-	var aspect := source_rect.size.x / maxf(source_rect.size.y, 1.0)
-	var destination_size := Vector2(68.0 * aspect, 68.0)
-	var destination := Rect2(
-		base + Vector2(-destination_size.x * 0.5, -destination_size.y + 3.0),
-		destination_size
-	)
-	draw_texture_rect_region(_sprite_atlas, destination, source_rect)
+	var source := Rect2(float(values[0]), float(values[1]), float(values[2]), float(values[3]))
+	var size := Vector2(68.0 * source.size.x / maxf(source.size.y, 1.0), 68.0)
+	draw_texture_rect_region(_sprite_atlas, Rect2(base + Vector2(-size.x * 0.5, -size.y + 3), size), source, tint)
 
 
 func _load_sprite_atlas_config() -> void:
@@ -1001,6 +1380,8 @@ func _load_sprite_atlas_config() -> void:
 		return
 	var config: Dictionary = parsed
 	_sprite_atlas = load(str(config.get("texture", ""))) as Texture2D
+	_citizen_roster = load("res://assets/pixel_art/citizen_roster_v1.png") as Texture2D
+	_buildables_atlas = load("res://assets/pixel_art/buildables_atlas_v1.png") as Texture2D
 	_agent_sprite_regions = config.get("agent_animations", {})
 	_environment_atlas = load(str(config.get("environment_texture", ""))) as Texture2D
 	_resource_sprite_regions = config.get("resource_sprites", {})
@@ -1099,12 +1480,11 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return true
 	if resource_type == "tree" and float(resource.get("growth", 1.0)) > 0.40:
-		var wind_phase := float(_visual_msec()) * 0.0016 + float(int(resource.get("x", 0)) * 3 + int(resource.get("y", 0)) * 5)
 		var chop_progress := _active_chop_progress(resource)
 		var impact_shake := 0.0
 		if chop_progress >= 0.0:
 			impact_shake = sin(float(_visual_msec()) * 0.034) * 0.035
-		var sway := sin(wind_phase) * 0.012 + impact_shake
+		var sway := _wind_angle(tile_center, 1.25) + impact_shake
 		draw_set_transform(tile_center + Vector2(0, 7), sway, Vector2.ONE)
 		draw_texture_rect_region(
 			_environment_atlas,
@@ -1120,6 +1500,16 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 				var chip_position: Vector2 = tile_center + Vector2.from_angle(chip_angle) * chip_distance + Vector2(0, 1)
 				draw_circle(chip_position, 1.4, Color("d89a57"))
 			draw_arc(tile_center + Vector2(0, 3), 19.0, PI, TAU, 18, Color(0.96, 0.76, 0.34, 0.35 + pulse * 0.35), 1.5)
+		return true
+	if resource_type in ["plant", "bush", "reeds", "herb", "cactus"]:
+		var flexibility := 2.8 if resource_type in ["plant", "reeds", "herb"] else 1.6
+		draw_set_transform(tile_center + Vector2(0, 7), _wind_angle(tile_center, flexibility), Vector2.ONE)
+		draw_texture_rect_region(
+			_environment_atlas,
+			Rect2(Vector2(-width * 0.5, -height), Vector2(width, height)),
+			source
+		)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return true
 	draw_texture_rect_region(_environment_atlas, destination, source)
 	return true
@@ -1168,6 +1558,9 @@ func _sort_resources(a: Dictionary, b: Dictionary) -> bool:
 
 
 func _refresh_resource_positions() -> void:
+	_effect_resources.clear()
+	for resource: Dictionary in _resources:
+		_effect_resources[str(resource.get("id", ""))] = resource
 	_resource_positions.clear()
 	for resource: Dictionary in _resources:
 		_resource_positions[Vector2i(int(resource["x"]), int(resource["y"]))] = true
@@ -1179,6 +1572,11 @@ func _rebuild_draw_order() -> void:
 		if _is_coordinate_visible(coordinate):
 			_ordered_coordinates.append(coordinate)
 	_ordered_coordinates.sort_custom(_sort_coordinates)
+	if not _is_dynamic_layer:
+		_ordered_resources.clear()
+		_ordered_structures.clear()
+		_rebuild_terrain_mesh()
+		return
 	_ordered_resources = _resources.filter(func(resource: Dictionary) -> bool:
 		return _is_coordinate_visible(Vector2i(int(resource["x"]), int(resource["y"])))
 	)
@@ -1189,9 +1587,89 @@ func _rebuild_draw_order() -> void:
 	_ordered_structures.sort_custom(_sort_resources)
 
 
+func _rebuild_terrain_mesh() -> void:
+	# One cached mesh replaces thousands of individual ground/texture commands.
+	# Rebuild only when world data or the streamed chunk window changes.
+	if not _terrain_mesh_dirty:
+		return
+	_terrain_mesh_dirty = false
+	if _terrain_mesh == null:
+		_terrain_mesh = MeshInstance2D.new()
+		_terrain_mesh.z_index = -1
+		var surface_material := ShaderMaterial.new()
+		surface_material.shader = preload("res://scripts/world/TerrainSurface.gdshader")
+		_terrain_mesh.material = surface_material
+		add_child(_terrain_mesh)
+	_terrain_mesh.texture = _environment_atlas
+	if _ordered_coordinates.is_empty():
+		_terrain_mesh.mesh = null
+		return
+	var vertices := PackedVector3Array()
+	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	var surface := PackedVector2Array([Vector2(104, 61), Vector2(162, 96), Vector2(104, 132), Vector2(47, 96)])
+	var aliases := {"forest": "grass", "mountain": "stone", "ocean": "water", "wetland": "water", "desert": "sand", "tundra": "snow", "ice": "snow", "meadow": "grass", "swamp": "water", "savanna": "sand", "volcanic": "stone"}
+	for coordinate: Vector2i in _ordered_coordinates:
+		var data: Dictionary = _tiles[coordinate]
+		var terrain := str(data.get("terrain", "grass")).to_lower()
+		var ground: Color = TERRAIN_COLORS.get(terrain, FALLBACK_COLOR)
+		ground = ground.lightened(sin(coordinate.x * 0.19 + coordinate.y * 0.13) * 0.025)
+		ground.a = 0.18
+		if terrain in ["snow", "tundra", "ice", "water", "ocean", "wetland", "swamp"]:
+			ground.a = 0.06
+		elif terrain in ["stone", "mountain"]:
+			ground.a = 0.3
+		var region: Array = _terrain_sprite_regions.get(aliases.get(terrain, terrain), [])
+		if region.size() != 4 or _environment_atlas == null:
+			ground.a = 0.0
+		var diamond := _diamond_at(map_to_local(coordinate))
+		var vertex_start := vertices.size()
+		var shift := posmod(coordinate.x * 17 + coordinate.y * 31 + int(data.get("metadata", {}).get("variant", 0)), 4)
+		for index: int in range(4):
+			vertices.append(Vector3(diamond[index].x, diamond[index].y, 0))
+			colors.append(ground)
+			uvs.append((Vector2(float(region[0]), float(region[1])) + surface[(index + shift) % 4]) / _environment_atlas.get_size() if ground.a > 0 else Vector2.ZERO)
+		for index: int in [0, 1, 2, 0, 2, 3]:
+			indices.append(vertex_start + index)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_terrain_mesh.mesh = mesh
+
+
 func _is_on_screen(local_position: Vector2, margin: float) -> bool:
-	var screen_position := get_global_transform_with_canvas() * local_position
-	return Rect2(Vector2.ZERO, get_viewport_rect().size).grow(margin).has_point(screen_position)
+	# The view rectangle is calculated once per draw. Previously every tile did a
+	# canvas transform and allocated a viewport rectangle, which dominated large maps.
+	return (_tile_view_rect if margin <= 100.0 else _object_view_rect).has_point(local_position)
+
+
+func _update_local_view_rect() -> void:
+	var canvas_transform := get_global_transform_with_canvas()
+	var inverse := canvas_transform.affine_inverse()
+	var viewport_size := get_viewport_rect().size
+	var top_left := inverse * Vector2.ZERO
+	var top_right := inverse * Vector2(viewport_size.x, 0.0)
+	var bottom_left := inverse * Vector2(0.0, viewport_size.y)
+	var bottom_right := inverse * viewport_size
+	var minimum := Vector2(
+		minf(minf(top_left.x, top_right.x), minf(bottom_left.x, bottom_right.x)),
+		minf(minf(top_left.y, top_right.y), minf(bottom_left.y, bottom_right.y))
+	)
+	var maximum := Vector2(
+		maxf(maxf(top_left.x, top_right.x), maxf(bottom_left.x, bottom_right.x)),
+		maxf(maxf(top_left.y, top_right.y), maxf(bottom_left.y, bottom_right.y))
+	)
+	_local_view_rect = Rect2(minimum, maximum - minimum)
+	_tile_view_rect = _local_view_rect.grow(100.0)
+	_object_view_rect = _local_view_rect.grow(150.0)
+	var screen_tile_width := tile_width * absf(canvas_transform.get_scale().x)
+	_draw_detail_level = mini(_quality_detail_cap, 2 if screen_tile_width >= 42.0 else (1 if screen_tile_width >= 22.0 else 0))
 
 
 func _is_coordinate_visible(coordinate: Vector2i) -> bool:

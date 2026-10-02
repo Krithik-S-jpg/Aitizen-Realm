@@ -4,9 +4,11 @@ from uuid import UUID
 
 from app.application.services.animal_service import AnimalService
 from app.application.services.world_generator import WorldGenerator
+from app.domain.models.calendar import DayPhase, Season
 from app.domain.models.entity import Entity, EntityKind
 from app.domain.models.needs import NeedsState
 from app.domain.models.resource import ResourceNode, ResourceType
+from app.domain.models.world import TerrainType
 from app.infrastructure.repositories.world_repository import InMemoryWorldRepository
 
 
@@ -176,3 +178,33 @@ def test_diurnal_deer_sleeps_at_night() -> None:
 
     assert deer.metadata["state"] == "sleep"
     assert deer.needs is not None and deer.needs.energy > 70.0
+
+
+def test_vulnerable_animal_moves_toward_forest_in_severe_weather() -> None:
+    """A storm changes animal movement, not only its displayed state."""
+    repository = InMemoryWorldRepository()
+    world = WorldGenerator.generate_flat_world(10, 10)
+    shelter_tile = world.retrieve_tile(7, 4)
+    assert shelter_tile is not None
+    shelter_tile.terrain = TerrainType.FOREST
+    deer = Entity(
+        id=UUID(int=7),
+        kind=EntityKind.ANIMAL,
+        name="Storm Deer",
+        x=2,
+        y=4,
+        metadata={
+            "species": "deer",
+            "weather_intensity": 0.9,
+            "ambient_temperature_c": -8.0,
+        },
+        needs=NeedsState(hunger=5.0, thirst=5.0, energy=70.0),
+    )
+    world.entities[str(deer.id)] = deer
+
+    AnimalService(repository)._decide(  # noqa: SLF001
+        world, deer, phase=DayPhase.DAY, season=Season.WINTER, tick=1
+    )
+
+    assert deer.metadata["state"] == "seek_weather_shelter"
+    assert deer.x > 2

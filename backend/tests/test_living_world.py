@@ -9,7 +9,7 @@ from tests.test_decisions import _systems
 
 
 def test_agent_survives_and_builds_from_world_resources() -> None:
-    """Run 480 ticks without direct action orders or free inventory materials."""
+    """Run 480 ticks including sleep, without direct orders or free materials."""
     entities, decisions, _ = _systems()
     repository = decisions._repository  # noqa: SLF001
     world = repository.get()
@@ -61,8 +61,8 @@ def test_agent_survives_and_builds_from_world_resources() -> None:
         ActionType.CHOP,
         ActionType.GATHER,
         ActionType.CRAFT,
-        ActionType.BUILD,
         ActionType.PLUCK,
         ActionType.EAT,
+        ActionType.BUILD,
     } <= completed
     assert any(site.completed for site in world.structures.values())

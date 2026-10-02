@@ -8,13 +8,11 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.infrastructure.api.dependencies import (
-    advance_world_entities,
-    advance_world_resources,
-    capture_world_metrics,
     get_engine_service,
     get_event_bus,
 )
 from app.infrastructure.api.v1.actions import router as actions_router
+from app.infrastructure.api.v1.checkpoints import router as checkpoints_router
 from app.infrastructure.api.v1.communications import router as communications_router
 from app.infrastructure.api.v1.entities import router as entities_router
 from app.infrastructure.api.v1.research import router as research_router
@@ -37,9 +35,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # 2. Register event subscribers (e.g. WebSocket broadcaster)
     event_bus = get_event_bus()
     await register_event_broadcaster(event_bus)
-    event_bus.subscribe("tick:completed", advance_world_resources)
-    event_bus.subscribe("tick:completed", advance_world_entities)
-    event_bus.subscribe("tick:completed", capture_world_metrics)
 
     yield
 
@@ -52,6 +47,12 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan,
+)
+
+app.include_router(
+    checkpoints_router,
+    prefix=f"{settings.API_V1_STR}/checkpoints",
+    tags=["checkpoints"],
 )
 
 

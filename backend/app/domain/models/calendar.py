@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Season(StrEnum):
@@ -53,18 +53,69 @@ class CalendarSnapshot(BaseModel):
     precipitation_radius: int
 
 
+class CalendarControl(BaseModel):
+    """Runtime environment controls owned by the authoritative simulation."""
+
+    ticks_per_day: int = Field(default=24, ge=12, le=480)
+    day_start_hour: int = Field(default=8, ge=2, le=12)
+    night_start_hour: int = Field(default=20, ge=16, le=23)
+    hour_offset: int = Field(default=0, ge=0, le=23)
+    season_override: Season | None = None
+    weather_override: WeatherType | None = None
+    weather_intensity_override: float | None = Field(default=None, ge=0.0, le=1.0)
+    temperature_override_c: float | None = Field(default=None, ge=-60.0, le=60.0)
+    wind_speed_override: float | None = Field(default=None, ge=0.0, le=40.0)
+    wind_direction_override: float | None = Field(default=None, ge=0.0, lt=360.0)
+    precipitation_radius_override: int | None = Field(default=None, ge=2, le=64)
+
+
+_calendar_control = CalendarControl()
+
+
+def get_calendar_control() -> CalendarControl:
+    """Returns a copy so API callers cannot mutate global state accidentally."""
+    return _calendar_control.model_copy(deep=True)
+
+
+def reset_calendar_control() -> CalendarControl:
+    """Restores deterministic automatic calendar and weather behavior."""
+    global _calendar_control
+    _calendar_control = CalendarControl()
+    return get_calendar_control()
+
+
+def configure_calendar_control(
+    tick: int,
+    control: CalendarControl,
+    current_hour: int | None = None,
+) -> CalendarControl:
+    """Applies validated runtime controls and optionally aligns the current hour."""
+    global _calendar_control
+    if control.night_start_hour - control.day_start_hour < 6:
+        raise ValueError("Daytime must be at least six hours long.")
+    if current_hour is not None:
+        if not 0 <= current_hour <= 23:
+            raise ValueError("Current hour must be between 0 and 23.")
+        natural_hour = int(tick * 24 / control.ticks_per_day + 6) % 24
+        offset = (current_hour - natural_hour) % 24
+        control = control.model_copy(update={"hour_offset": offset})
+    _calendar_control = control.model_copy(deep=True)
+    return get_calendar_control()
+
+
 def calendar_at_tick(tick: int) -> CalendarSnapshot:
     """Returns a reproducible calendar snapshot for a tick."""
-    total_hours = tick + 6
+    control = _calendar_control
+    total_hours = int(tick * 24 / control.ticks_per_day) + 6 + control.hour_offset
     hour = total_hours % 24
     total_days = total_hours // 24
-    season = list(Season)[(total_days // 30) % len(Season)]
+    season = control.season_override or list(Season)[(total_days // 30) % len(Season)]
 
-    if 5 <= hour <= 7:
+    if control.day_start_hour - 2 <= hour < control.day_start_hour:
         phase = DayPhase.DAWN
-    elif 8 <= hour <= 17:
+    elif control.day_start_hour <= hour < control.night_start_hour - 2:
         phase = DayPhase.DAY
-    elif 18 <= hour <= 20:
+    elif control.night_start_hour - 2 <= hour < control.night_start_hour:
         phase = DayPhase.DUSK
     else:
         phase = DayPhase.NIGHT
@@ -78,6 +129,11 @@ def calendar_at_tick(tick: int) -> CalendarSnapshot:
     elif season != Season.WINTER and day % 4 == 1:
         weather = WeatherType.RAIN
         intensity = 0.4 + (day % 3) * 0.15
+    if control.weather_override is not None:
+        weather = control.weather_override
+        intensity = 0.0 if weather == WeatherType.CLEAR else 0.65
+    if control.weather_intensity_override is not None:
+        intensity = control.weather_intensity_override
 
     seasonal_temperature = {
         Season.SPRING: 16.0,
@@ -91,9 +147,15 @@ def calendar_at_tick(tick: int) -> CalendarSnapshot:
         temperature -= 2.5
     elif weather == WeatherType.SNOW:
         temperature = min(temperature, -0.5)
+    if control.temperature_override_c is not None:
+        temperature = control.temperature_override_c
 
     wind_speed = 4.0 + ((day * 7 + hour * 3) % 12) * 0.65
     wind_direction = float((day * 37 + hour * 11) % 360)
+    if control.wind_speed_override is not None:
+        wind_speed = control.wind_speed_override
+    if control.wind_direction_override is not None:
+        wind_direction = control.wind_direction_override
     daylight = max(0.0, 1.0 - abs(hour - 12.0) / 8.0)
     humidity = {
         Season.SPRING: 0.62,
@@ -116,6 +178,8 @@ def calendar_at_tick(tick: int) -> CalendarSnapshot:
     precipitation_center_x = 0.2 + float((day * 17) % 60) / 100.0
     precipitation_center_y = 0.2 + float((day * 29) % 60) / 100.0
     precipitation_radius = 8 + (day % 7)
+    if control.precipitation_radius_override is not None:
+        precipitation_radius = control.precipitation_radius_override
 
     return CalendarSnapshot(
         day=day,

@@ -16,6 +16,7 @@ from app.application.services.navigation_service import NavigationService
 from app.application.services.needs_service import NeedsService
 from app.application.services.perception_service import PerceptionService
 from app.application.services.resource_service import ResourceService
+from app.application.services.settlement_service import SettlementService
 from app.application.services.society_service import SocietyService
 from app.application.services.world_service import WorldService
 from app.core.config import settings
@@ -50,6 +51,7 @@ _animal_service = AnimalService(repository=_world_repository)
 _goal_action_service = GoalActionService(repository=_world_repository)
 _memory_service = MemoryService(repository=_world_repository)
 _society_service = SocietyService(repository=_world_repository)
+_settlement_service = SettlementService(repository=_world_repository)
 _analytics_service = AnalyticsService(repository=_world_repository)
 _communication_service = CommunicationService(
     repository=_world_repository,
@@ -162,11 +164,45 @@ async def advance_world_entities(event: Event) -> None:
     _navigation_service.advance_all(event.tick)
     _needs_service.advance_all(event.tick)
     _animal_service.advance_all(event.tick)
-    _decision_service.advance_all(event.tick)
-    _memory_service.decay_all(event.tick)
     _society_service.advance_all(event.tick)
+    _settlement_service.advance_all(event.tick)
+    _decision_service.advance_all(event.tick)
+    _settlement_service.advance_all(event.tick)
+    _memory_service.decay_all(event.tick)
 
 
 async def capture_world_metrics(event: Event) -> None:
     """Records one non-invasive research snapshot after a completed tick."""
     _analytics_service.capture(event.tick)
+
+
+async def advance_simulation_tick(event: Event) -> None:
+    """Applies one authoritative tick in a deterministic transaction order."""
+    _world_service.advance_resources(event.tick)
+    _navigation_service.advance_all(event.tick)
+    _needs_service.advance_all(event.tick)
+    _animal_service.advance_all(event.tick)
+    _society_service.advance_all(event.tick)
+    _settlement_service.advance_all(event.tick)
+    _decision_service.advance_all(event.tick)
+    _settlement_service.advance_all(event.tick)
+    _memory_service.decay_all(event.tick)
+    _analytics_service.capture(event.tick)
+
+
+def restore_checkpoint_state(world: object, tick: int, tick_rate: float) -> None:
+    """Commit validated state without yielding between clock and world updates."""
+    from app.domain.models.world import World
+
+    if not isinstance(world, World):
+        raise ValueError("Invalid checkpoint world")
+    if _scheduler.get_all_scheduled_tasks():
+        raise RuntimeError("Restore requires an empty scheduler")
+    _engine.restore_clock(tick, tick_rate)
+    _world_service.restore_world(world)
+    # Observations from the previous timeline must not leak into restored history.
+    global _analytics_service
+    _analytics_service = AnalyticsService(repository=_world_repository)
+
+
+_engine.set_tick_processor(advance_simulation_tick)

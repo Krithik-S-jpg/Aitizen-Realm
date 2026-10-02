@@ -106,6 +106,60 @@ def test_only_opted_in_agents_run_automatic_decisions() -> None:
     assert lifecycle.history(manual.id)["goals"] == []
 
 
+def test_autonomous_citizen_sleeps_through_night_and_wakes_at_dawn() -> None:
+    """Night is a persistent life state rather than an instant rest action."""
+    entities, decisions, lifecycle = _systems()
+    citizen = entities.create(EntityKind.AGENT, "Sleeper", 5, 5, tags={"autonomous"})
+    assert citizen.needs is not None
+    citizen.needs.energy = 50
+
+    decisions.advance_all(tick=18)
+    assert citizen.metadata["state"] == "sleep"
+    assert citizen.metadata["sleeping_since_tick"] == 18
+    assert lifecycle.history(citizen.id)["goals"] == []
+    energy_after_bedtime = citizen.needs.energy
+
+    decisions.advance_all(tick=19)
+    assert citizen.metadata["state"] == "sleep"
+    assert citizen.needs.energy > energy_after_bedtime
+
+    decisions.advance_all(tick=0)
+    assert citizen.metadata["state"] != "sleep"
+    assert citizen.metadata["woke_at_tick"] == 0
+
+
+def test_evening_sleep_and_urgent_night_waking() -> None:
+    """Citizens sleep at nightfall, but urgent thirst interrupts that state."""
+    entities, decisions, _ = _systems()
+    citizen = entities.create(EntityKind.AGENT, "Sleeper", 5, 5, tags={"autonomous"})
+    assert citizen.needs is not None
+    decisions.advance_all(tick=14)  # 20:00, configured nightfall.
+    assert citizen.metadata["state"] == "sleep"
+    citizen.needs.thirst = 90
+    decisions.advance_all(tick=15)
+    assert citizen.metadata["state"] != "sleep"
+    assert "sleeping_since_tick" not in citizen.metadata
+    assert citizen.metadata["woke_at_tick"] == 15
+
+
+def test_sleep_follows_custom_night_start() -> None:
+    """A custom night start changes bedtime without a hard-coded midnight."""
+    from app.domain.models.calendar import (
+        CalendarControl,
+        configure_calendar_control,
+        reset_calendar_control,
+    )
+
+    entities, decisions, _ = _systems()
+    citizen = entities.create(EntityKind.AGENT, "Sleeper", 5, 5, tags={"autonomous"})
+    try:
+        configure_calendar_control(0, CalendarControl(night_start_hour=22))
+        decisions.advance_all(16)  # 22:00.
+        assert citizen.metadata["state"] == "sleep"
+    finally:
+        reset_calendar_control()
+
+
 def test_infeasible_need_falls_back_to_next_utility_option() -> None:
     """High thirst without known water does not crash the decision tick."""
     entities, decisions, _ = _systems()
@@ -216,7 +270,10 @@ def test_autonomous_agent_constructs_shelter_over_time() -> None:
     shelter = next(iter(world.structures.values()))
     assert shelter.structure_type == StructureType.SHELTER
     assert shelter.completed
-    assert action.status == TaskStatus.COMPLETED
+    assert any(
+        item.status == TaskStatus.COMPLETED and item.result.get("built") == "shelter"
+        for item in world.actions.values()
+    )
 
 
 def test_adjacent_agent_finishes_felling_then_collects_ground_timber() -> None:

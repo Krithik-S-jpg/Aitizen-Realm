@@ -107,6 +107,12 @@ class GoalActionService:
 
     def _clear_active(self, entity_id: UUID) -> None:
         world = self._require_world()
+        # A completed/interrupted worker must not hold a harvest site hostage.
+        action = world.actions.get(world.active_actions.get(str(entity_id), ""))
+        if action is not None:
+            resource = world.resources.get(str(action.target.get("resource_id", "")))
+            if resource is not None and resource.reserved_by == str(entity_id):
+                resource.release(str(entity_id))
         world.active_goals.pop(str(entity_id), None)
         world.active_actions.pop(str(entity_id), None)
 
@@ -131,6 +137,18 @@ class GoalActionService:
                 100.0, entity.skills.get(skill, 0.0) + experience
             )
         outcome = "completed" if succeeded else "failed"
+        recent = entity.metadata.setdefault("recent_actions", [])
+        recent.append(
+            {
+                "tick": tick,
+                "action": action.action_type.value.lower(),
+                "outcome": outcome,
+                "reason": goal.reason,
+                "result": action.result,
+                "failure": action.failure_reason,
+            }
+        )
+        entity.metadata["recent_actions"] = recent[-8:]
         episode = Episode(
             entity_id=entity.id,
             episode_type=EpisodeType.ACTION_RESULT,
@@ -145,6 +163,7 @@ class GoalActionService:
             details={
                 "goal_id": str(goal.id),
                 "action_id": str(action.id),
+                "action_type": action.action_type.value,
                 "succeeded": succeeded,
                 "result": action.result,
                 "failure_reason": action.failure_reason,

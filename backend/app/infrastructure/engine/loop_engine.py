@@ -5,7 +5,9 @@ Drives the simulation timeline and orchestrates event and task processing.
 
 import asyncio
 import logging
+import math
 import time
+from collections.abc import Awaitable, Callable
 
 from app.domain.interfaces.engine import ISimulationEngine
 from app.domain.interfaces.event_bus import IEventBus
@@ -38,6 +40,22 @@ class LoopEngine(ISimulationEngine):
         self._current_tick = Tick(value=0, timestamp=time.time())
         self._loop_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+        self._stepping = False
+        self._tick_processor: Callable[[Event], Awaitable[None]] | None = None
+
+    def set_tick_processor(self, processor: Callable[[Event], Awaitable[None]]) -> None:
+        """Install authoritative work that must finish before observers see a tick."""
+        self._tick_processor = processor
+
+    def restore_clock(self, tick: int, tick_rate: float) -> None:
+        """Restore a quiescent clock; callers commit world state synchronously."""
+        if self._state == EngineState.RUNNING or self._stepping:
+            raise RuntimeError("Pause and wait for the current tick before restoring")
+        if tick < 0 or not math.isfinite(tick_rate) or tick_rate <= 0:
+            raise ValueError("Invalid checkpoint clock")
+        self._current_tick = Tick(value=tick, timestamp=time.time())
+        self._ticks_per_second = tick_rate
+        self._state = EngineState.PAUSED
 
     def get_state(self) -> EngineState:
         """Gets the current state of the engine.
@@ -133,6 +151,16 @@ class LoopEngine(ISimulationEngine):
                 self._loop_task = asyncio.create_task(self._run_loop())
 
     async def step(self) -> Tick:
+        """Serialize tick execution and expose an in-flight restore guard."""
+        if self._stepping:
+            raise RuntimeError("A simulation tick is already in progress")
+        self._stepping = True
+        try:
+            return await self._execute_step()
+        finally:
+            self._stepping = False
+
+    async def _execute_step(self) -> Tick:
         """Executes a single tick of the simulation synchronously.
 
         This is useful for debugging or step-by-step external control.
@@ -165,6 +193,24 @@ class LoopEngine(ISimulationEngine):
 
         # 2. Process all pending tasks in the Scheduler
         await self._scheduler.process_tick(next_t.value)
+
+        if self._tick_processor is not None:
+            try:
+                await self._tick_processor(
+                    Event(name="tick:advance", tick=next_t.value, timestamp=time.time())
+                )
+            except Exception:
+                # A failed update may have partial mutations. Stop automatic progress
+                # and never advertise it as a completed, coherent snapshot.
+                self._state = EngineState.PAUSED
+                await self._event_bus.publish(
+                    Event(
+                        name="simulation:failed",
+                        tick=next_t.value,
+                        timestamp=time.time(),
+                    )
+                )
+                raise
 
         # 3. Dispatch "tick:completed" event
         await self._event_bus.publish(

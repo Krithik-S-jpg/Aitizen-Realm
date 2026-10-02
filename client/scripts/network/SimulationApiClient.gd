@@ -8,6 +8,7 @@ signal state_received(state: Dictionary)
 signal simulation_event_received(event: Dictionary)
 signal connection_changed(is_connected: bool)
 signal request_failed(error_message: String)
+signal environment_received(data: Dictionary)
 
 @export var simulation_url: String = ""
 @export var websocket_url: String = ""
@@ -19,6 +20,7 @@ var _request_in_flight := false
 var _requested_path := ""
 var _pending_path := ""
 var _pending_method := HTTPClient.METHOD_GET
+var _pending_body := ""
 
 
 func _ready() -> void:
@@ -73,15 +75,29 @@ func set_tick_rate(ticks_per_second: float) -> void:
 	)
 
 
-func _send_request(path: String, method: HTTPClient.Method) -> void:
+func fetch_environment() -> void:
+	_send_request("/environment", HTTPClient.METHOD_GET)
+
+
+func set_environment(settings: Dictionary) -> void:
+	_send_request("/environment", HTTPClient.METHOD_POST, JSON.stringify(settings))
+
+
+func reset_environment() -> void:
+	_send_request("/environment", HTTPClient.METHOD_DELETE)
+
+
+func _send_request(path: String, method: HTTPClient.Method, body: String = "") -> void:
 	if _request_in_flight:
 		# Keep the latest user command instead of surfacing a harmless race as an error.
 		if method != HTTPClient.METHOD_GET:
 			_pending_path = path
 			_pending_method = method
+			_pending_body = body
 		return
 	_requested_path = path
-	var error := _request.request(simulation_url + path, PackedStringArray(), method)
+	var headers := PackedStringArray(["Content-Type: application/json"]) if not body.is_empty() else PackedStringArray()
+	var error := _request.request(simulation_url + path, headers, method, body)
 	if error != OK:
 		request_failed.emit("Could not send simulation request (error %d)." % error)
 		return
@@ -99,14 +115,25 @@ func _on_request_completed(
 		request_failed.emit("Simulation API request failed (HTTP %d)." % response_code)
 		return
 
-	_parse_message(body.get_string_from_utf8())
+	var completed_path := _requested_path
+	var message := body.get_string_from_utf8()
+	if completed_path == "/environment":
+		var parsed: Variant = JSON.parse_string(message)
+		if parsed is Dictionary:
+			environment_received.emit(parsed as Dictionary)
+		else:
+			request_failed.emit("Environment API returned invalid JSON.")
+	else:
+		_parse_message(message)
 	if not _pending_path.is_empty():
 		var next_path := _pending_path
 		var next_method := _pending_method
+		var next_body := _pending_body
 		_pending_path = ""
-		call_deferred("_send_request", next_path, next_method)
+		_pending_body = ""
+		call_deferred("_send_request", next_path, next_method, next_body)
 	# Command responses do not include the complete clock state.
-	elif _requested_path != "/state":
+	elif completed_path != "/state" and completed_path != "/environment":
 		call_deferred("fetch_state")
 
 

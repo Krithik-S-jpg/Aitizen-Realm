@@ -53,6 +53,7 @@ func display_blueprints(blueprints: Dictionary) -> void:
 
 func _render_blueprints() -> void:
 	for child: Node in cards.get_children():
+		cards.remove_child(child)
 		child.queue_free()
 	var names: Array[String] = []
 	for blueprint_name: Variant in _blueprints.keys():
@@ -67,6 +68,7 @@ func _render_blueprints() -> void:
 	count_label.text = "%d KNOWN" % names.size()
 	status_label.text = "Blueprint knowledge synchronized"
 	status_label.modulate = Color("75d7ba")
+	preload("res://scripts/ui/AtlasTheme.gd").apply_to(cards)
 
 
 func _set_filter(filter_name: String) -> void:

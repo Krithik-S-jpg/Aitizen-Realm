@@ -2,8 +2,11 @@
 
 from uuid import UUID
 
+from app.application.services.entity_presentation import activity_details
+from app.application.services.danger_memory import memory_graph
+
 from app.domain.interfaces.world_repository import IWorldRepository
-from app.domain.models.entity import Entity, EntityKind, EntityKnowledge
+from app.domain.models.entity import CitizenAvatar, Entity, EntityKind, EntityKnowledge
 from app.domain.models.inventory import Inventory
 from app.domain.models.needs import NeedsState
 from app.domain.models.world import World
@@ -24,9 +27,29 @@ class EntityService:
         y: int,
         perception_radius: int = 6,
         tags: set[str] | None = None,
+        avatar_id: CitizenAvatar = CitizenAvatar.SCOUT,
+        auto_spawn: bool = False,
     ) -> Entity:
         """Creates an entity on a loaded, walkable world tile."""
         world = self._require_world()
+        if auto_spawn:
+            occupied = {(e.x, e.y) for e in world.entities.values() if e.active}
+            occupied.update((s.x, s.y) for s in world.structures.values())
+            candidates = (
+                tile
+                for chunk in world.chunks.values()
+                for tile in chunk.iterate_tiles()
+                if tile.walkable and (tile.x, tile.y) not in occupied
+                and 0 <= tile.x < world.width and 0 <= tile.y < world.height
+            )
+            nearest = min(
+                candidates,
+                key=lambda tile: ((tile.x - x) ** 2 + (tile.y - y) ** 2, tile.y, tile.x),
+                default=None,
+            )
+            if nearest is None:
+                raise ValueError("No free walkable tile is available. Load or create a world with land.")
+            x, y = nearest.x, nearest.y
         tile = world.retrieve_tile(x, y)
         if tile is None:
             raise LookupError("Entity tile is not loaded.")
@@ -39,6 +62,7 @@ class EntityService:
             y=y,
             perception_radius=perception_radius,
             tags=tags or set(),
+            avatar_id=avatar_id,
             needs=NeedsState()
             if kind in {EntityKind.AGENT, EntityKind.ANIMAL}
             else None,
@@ -79,6 +103,21 @@ class EntityService:
             action = world.actions.get(world.active_actions.get(key, ""))
             knowledge = world.entity_knowledge.get(key)
             inventory = world.inventories.get(key)
+            life_state = str(entity.metadata.get("state", "idle"))
+            visible_action = (
+                life_state
+                if life_state in {"sleep", "seek_shelter"}
+                or (
+                    life_state == "socialize"
+                    and action is not None
+                    and "social_with" in action.target
+                )
+                else (
+                    action.action_type.value.lower()
+                    if action is not None
+                    else life_state
+                )
+            )
             result.append(
                 {
                     **entity.model_dump(mode="json"),
@@ -89,9 +128,14 @@ class EntityService:
                     "goal": goal.goal_type.value.lower()
                     if goal is not None
                     else ("survive" if entity.kind == EntityKind.ANIMAL else "idle"),
-                    "action": action.action_type.value.lower()
-                    if action is not None
-                    else str(entity.metadata.get("state", "idle")),
+                    "action": visible_action,
+                    "decision_reason": goal.reason
+                    if goal is not None
+                    else entity.metadata.get(
+                        "blocked_reason",
+                        entity.metadata.get("last_decision_reason", ""),
+                    ),
+                    "decision_trace": entity.metadata.get("decision_trace", []),
                     "action_progress": action.progress_ratio
                     if action is not None
                     else 0.0,
@@ -104,6 +148,8 @@ class EntityService:
                     }
                     if knowledge is not None
                     else {},
+                    **activity_details(world, entity),
+                    "memory_graph": memory_graph(world, entity),
                 }
             )
         return result

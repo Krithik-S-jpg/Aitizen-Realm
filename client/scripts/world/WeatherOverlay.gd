@@ -13,6 +13,9 @@ var _display_intensity: float = 0.0
 var _region_center: Vector2 = Vector2.ZERO
 var _region_radius_x: float = 320.0
 var _region_radius_y: float = 160.0
+var _simulation_running := true
+var _local_view_rect := Rect2()
+var _quality_scale := 1.0
 
 
 func configure(
@@ -36,6 +39,8 @@ func configure(
 
 
 func _process(delta: float) -> void:
+	if not _simulation_running:
+		return
 	_elapsed += delta
 	_display_intensity = move_toward(
 		_display_intensity,
@@ -46,14 +51,30 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 
+func set_simulation_running(running: bool) -> void:
+	_simulation_running = running
+
+
+func set_visual_quality(quality: String) -> void:
+	_quality_scale = {"performance": 0.45, "balanced": 0.72, "high": 1.0}.get(quality.to_lower(), 1.0)
+	queue_redraw()
+
+
 func _draw() -> void:
 	if _display_intensity <= 0.001:
 		return
+	_update_local_view_rect()
+	var weather_bounds := Rect2(
+		_region_center - Vector2(_region_radius_x, _region_radius_y),
+		Vector2(_region_radius_x * 2.0, _region_radius_y * 2.0)
+	)
+	if not _local_view_rect.intersects(weather_bounds):
+		return
 	if _weather == "RAIN":
-		_draw_rain(150)
-		_draw_splashes(32)
+		_draw_rain(roundi(150.0 * _quality_scale))
+		_draw_splashes(roundi(32.0 * _quality_scale))
 	elif _weather == "SNOW":
-		_draw_snow(130)
+		_draw_snow(roundi(130.0 * _quality_scale))
 
 
 func _draw_rain(max_count: int) -> void:
@@ -69,6 +90,8 @@ func _draw_rain(max_count: int) -> void:
 			normalized_x * _region_radius_x,
 			normalized_y * _region_radius_y
 		)
+		if not _local_view_rect.has_point(start):
+			continue
 		var depth: float = 0.65 + float(index % 4) * 0.12
 		draw_line(
 			start,
@@ -91,6 +114,8 @@ func _draw_splashes(max_count: int) -> void:
 			cos(angle) * distance * _region_radius_x,
 			sin(angle) * distance * _region_radius_y
 		)
+		if not _local_view_rect.has_point(splash_position):
+			continue
 		draw_arc(splash_position, 2.0 + cycle * 15.0, PI, TAU, 10, Color(0.72, 0.88, 1.0, 0.55), 1.0)
 
 
@@ -107,4 +132,23 @@ func _draw_snow(max_count: int) -> void:
 			normalized_x * _region_radius_x + drift,
 			normalized_y * _region_radius_y
 		)
+		if not _local_view_rect.has_point(flake_position):
+			continue
 		draw_circle(flake_position, 1.8 + float(index % 3) * 0.7, Color(1.0, 1.0, 1.0, 0.82))
+
+
+func _update_local_view_rect() -> void:
+	var inverse := get_global_transform_with_canvas().affine_inverse()
+	var viewport_size := get_viewport_rect().size
+	var points := PackedVector2Array([
+		inverse * Vector2.ZERO,
+		inverse * Vector2(viewport_size.x, 0.0),
+		inverse * Vector2(0.0, viewport_size.y),
+		inverse * viewport_size
+	])
+	var minimum := points[0]
+	var maximum := points[0]
+	for point: Vector2 in points:
+		minimum = Vector2(minf(minimum.x, point.x), minf(minimum.y, point.y))
+		maximum = Vector2(maxf(maximum.x, point.x), maxf(maximum.y, point.y))
+	_local_view_rect = Rect2(minimum, maximum - minimum).grow(24.0)

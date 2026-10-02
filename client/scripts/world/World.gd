@@ -19,6 +19,7 @@ func render_parsed_world(parsed_world: Dictionary) -> void:
 
 
 func configure_weather(calendar: Dictionary, world_width: int, world_height: int) -> void:
+	renderer.configure_environment(calendar)
 	var center_map := Vector2i(
 		roundi(float(world_width - 1) * float(calendar.get("precipitation_center_x", 0.5))),
 		roundi(float(world_height - 1) * float(calendar.get("precipitation_center_y", 0.5)))
@@ -34,3 +35,13 @@ func configure_weather(calendar: Dictionary, world_width: int, world_height: int
 		renderer.tile_width,
 		renderer.tile_height
 	)
+
+
+func set_simulation_running(running: bool) -> void:
+	renderer.set_simulation_running(running)
+	weather_overlay.set_simulation_running(running)
+
+
+func set_visual_quality(quality: String) -> void:
+	renderer.set_visual_quality(quality)
+	weather_overlay.set_visual_quality(quality)

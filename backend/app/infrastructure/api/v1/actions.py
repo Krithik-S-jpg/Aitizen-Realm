@@ -107,6 +107,8 @@ def _structure_payload(structure: Any) -> dict[str, Any]:
         **structure.model_dump(mode="json"),
         "structure_type": structure.structure_type.value.lower(),
         "completed": structure.completed,
+        "funded": structure.funded,
+        "missing_materials": structure.missing_materials,
         "progress_ratio": structure.progress / structure.work_required,
     }
 

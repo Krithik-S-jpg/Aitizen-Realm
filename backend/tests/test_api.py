@@ -35,6 +35,15 @@ def test_generated_world_contains_one_autonomous_player(api_client: TestClient) 
     assert players[0]["goal"] == "idle"
 
 
+def test_new_world_accepts_a_selected_player_character(api_client: TestClient) -> None:
+    """The user's roster choice becomes the authoritative starting citizen."""
+    world = api_client.post(
+        "/api/v1/world/generate?seed=847291&player_avatar=artisan"
+    ).json()
+    player = next(entity for entity in world["entities"] if "player" in entity["tags"])
+    assert player["avatar_id"] == "artisan"
+
+
 def test_world_exposes_versioned_observation_layers(api_client: TestClient) -> None:
     """Observers can distinguish real layers from unimplemented systems."""
     payload = api_client.get("/api/v1/world").json()
@@ -130,6 +139,44 @@ def test_simulation_tick_rate_endpoint(api_client: TestClient) -> None:
     # Invalid rate (Query gt=0.0 check will catch <= 0)
     resp = api_client.post("/api/v1/simulation/rate?ticks_per_second=-2.0")
     assert resp.status_code == 422  # query validation error
+
+
+def test_environment_controls_are_live_and_resettable(api_client: TestClient) -> None:
+    """The settings UI has an authoritative API rather than client-only labels."""
+    try:
+        response = api_client.post(
+            "/api/v1/simulation/environment",
+            json={
+                "ticks_per_day": 72,
+                "current_hour": 23,
+                "day_start_hour": 7,
+                "night_start_hour": 22,
+                "season_override": "WINTER",
+                "weather_override": "SNOW",
+                "weather_intensity_override": 0.8,
+                "temperature_override_c": -8,
+                "wind_speed_override": 14,
+                "wind_direction_override": 180,
+                "precipitation_radius_override": 20,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["calendar"]["hour"] == 23
+        assert payload["calendar"]["phase"] == "NIGHT"
+        assert payload["calendar"]["weather"] == "SNOW"
+        assert payload["control"]["ticks_per_day"] == 72
+    finally:
+        reset = api_client.delete("/api/v1/simulation/environment")
+        assert reset.status_code == 200
+        assert reset.json()["control"]["weather_override"] is None
+
+
+def test_world_event_feed_endpoint(api_client: TestClient) -> None:
+    """Observers can incrementally retrieve backend-derived world events."""
+    response = api_client.get("/api/v1/research/events?after_sequence=-1&limit=20")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
 
 
 def test_cannot_step_via_api_while_running(api_client: TestClient) -> None:

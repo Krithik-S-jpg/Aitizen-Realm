@@ -13,7 +13,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.application.services.world_service import WorldService
+from app.application.services.entity_presentation import activity_details
 from app.core.config import settings
+from app.domain.models.entity import CitizenAvatar
 from app.domain.models.world import World
 from app.infrastructure.api.dependencies import get_world_service
 
@@ -90,11 +92,12 @@ def generate_world(
     width: int = Query(default=DEFAULT_WORLD_WIDTH, ge=8, le=128),
     height: int = Query(default=DEFAULT_WORLD_HEIGHT, ge=8, le=128),
     seed: int | None = Query(default=None, ge=0, le=2_147_483_647),
+    player_avatar: CitizenAvatar = Query(default=CitizenAvatar.SCOUT),
     world_service: WorldService = Depends(get_world_service),
 ) -> dict[str, Any]:
     """Discards the active world and generates a fresh authoritative world."""
     resolved_seed = seed if seed is not None else secrets.randbelow(2_147_483_648)
-    world = world_service.reset_world(width, height, resolved_seed)
+    world = world_service.reset_world(width, height, resolved_seed, player_avatar)
     return _format_world(world)
 
 
@@ -267,6 +270,8 @@ def _format_structure(structure: Any) -> dict[str, Any]:
         **structure.model_dump(mode="json"),
         "structure_type": structure.structure_type.value.lower(),
         "completed": structure.completed,
+        "funded": structure.funded,
+        "missing_materials": structure.missing_materials,
         "progress_ratio": structure.progress / structure.work_required,
     }
 
@@ -290,6 +295,7 @@ def _format_entity(entity: Any, world: World) -> dict[str, Any]:
         "y": entity.y,
         "tags": sorted(entity.tags),
         "profession": entity.profession.value.lower(),
+        "avatar_id": entity.avatar_id.value,
         "skills": entity.skills,
         "group_id": entity.group_id,
         "perception_radius": entity.perception_radius,
@@ -317,4 +323,5 @@ def _format_entity(entity: Any, world: World) -> dict[str, Any]:
         if active_goal is not None
         else entity.metadata.get("blocked_reason", ""),
         "metadata": entity.metadata,
+        **activity_details(world, entity),
     }

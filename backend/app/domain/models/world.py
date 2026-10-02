@@ -18,7 +18,7 @@ from app.domain.models.inventory import Inventory
 from app.domain.models.memory import Episode, Message
 from app.domain.models.navigation import MovementPlan
 from app.domain.models.resource import ResourceNode
-from app.domain.models.society import SocialBond, SocialGroup
+from app.domain.models.society import Household, SettlementJob, SocialBond, SocialGroup
 from app.domain.models.structure import Structure
 
 
@@ -236,6 +236,8 @@ class World(BaseModel):
     messages: list[Message] = Field(default_factory=list)
     social_bonds: dict[str, SocialBond] = Field(default_factory=dict)
     groups: dict[str, SocialGroup] = Field(default_factory=dict)
+    households: dict[str, Household] = Field(default_factory=dict)
+    settlement_jobs: dict[str, SettlementJob] = Field(default_factory=dict)
     chunks: dict[str, Chunk] = Field(
         default_factory=dict,
         description="Dictionary mapping 'cx,cy' coordinate keys to Chunk",

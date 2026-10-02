@@ -20,6 +20,7 @@ class StructureType(StrEnum):
     TORCH = "TORCH"
     FENCE = "FENCE"
     FARM = "FARM"
+    ROAD = "ROAD"
 
 
 class Structure(BaseModel):
@@ -36,11 +37,35 @@ class Structure(BaseModel):
     fuel: float = Field(default=0.0, ge=0.0)
     crop_growth: float = Field(default=0.0, ge=0.0, le=1.0)
     crop_food: float = Field(default=0.0, ge=0.0)
+    materials_required: dict[str, float] = Field(default_factory=dict)
+    materials_delivered: dict[str, float] = Field(default_factory=dict)
+    bed_capacity: int = Field(default=0, ge=0)
+    resident_ids: list[str] = Field(default_factory=list)
+    planted: bool = False
+    watered: bool = False
+    last_tended_tick: int | None = Field(default=None, ge=0)
 
     @property
     def completed(self) -> bool:
         """Returns whether all required construction work is finished."""
         return self.progress >= self.work_required
+
+    @property
+    def funded(self) -> bool:
+        """Returns whether every construction material reached the site."""
+        return all(
+            self.materials_delivered.get(material, 0.0) >= amount
+            for material, amount in self.materials_required.items()
+        )
+
+    @property
+    def missing_materials(self) -> dict[str, float]:
+        """Returns positive material deficits remaining at this site."""
+        return {
+            material: missing
+            for material, required in self.materials_required.items()
+            if (missing := required - self.materials_delivered.get(material, 0.0)) > 0.0
+        }
 
     def apply_work(self, amount: float) -> float:
         """Applies work without exceeding the blueprint requirement."""

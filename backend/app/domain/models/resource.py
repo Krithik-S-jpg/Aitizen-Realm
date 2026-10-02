@@ -22,6 +22,7 @@ class ResourceType(StrEnum):
     CLAY = "CLAY"
     CACTUS = "CACTUS"
     HERB = "HERB"
+    CARCASS = "CARCASS"
 
 
 class ResourceNode(BaseModel):
@@ -31,7 +32,7 @@ class ResourceNode(BaseModel):
     resource_type: ResourceType
     x: int
     y: int
-    quantity: float = Field(gt=0.0)
+    quantity: float = Field(ge=0.0)
     capacity: float = Field(gt=0.0)
     regeneration_per_tick: float = Field(default=0.0, ge=0.0)
     growth: float = Field(default=1.0, ge=0.0, le=1.0)

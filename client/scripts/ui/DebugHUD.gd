@@ -332,7 +332,7 @@ func _build_command_hud() -> void:
 	header.offset_left = 18.0
 	header.offset_top = 12.0
 	header.offset_right = -18.0
-	header.offset_bottom = 76.0
+	header.offset_bottom = 62.0
 	header.add_theme_stylebox_override("panel", _panel_style(Color("071722ed"), Color("286277"), 15))
 	var header_style := header.get_theme_stylebox("panel") as StyleBoxFlat
 	header_style.content_margin_left = 16
@@ -347,8 +347,7 @@ func _build_command_hud() -> void:
 	_brand = brand
 	brand.custom_minimum_size.x = 220
 	header_row.add_child(brand)
-	brand.add_child(_hud_label("AITIZEN REALM", 22, Color("ecdfbb")))
-	brand.add_child(_hud_label("FIELD OBSERVATORY  /  LIVE WORLD", 9, Color("a6b6a1")))
+	brand.add_child(_hud_label("◈  Aitizen Realm", 19, Color("e6f3f1")))
 	var nav := HBoxContainer.new()
 	nav.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	nav.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -356,9 +355,11 @@ func _build_command_hud() -> void:
 	header_row.add_child(nav)
 	nav.add_child(_nav_button("World", func() -> void: navigation_requested.emit("world"), true))
 	nav.add_child(_nav_button("Citizens", func() -> void: navigation_requested.emit("citizens")))
+	nav.add_child(_nav_button("Settlements", func() -> void: navigation_requested.emit("settlements")))
+	nav.add_child(_nav_button("Economy", func() -> void: navigation_requested.emit("economy")))
 	nav.add_child(_nav_button("Build", func() -> void: navigation_requested.emit("build")))
 	nav.add_child(_nav_button("Research", func() -> void: navigation_requested.emit("research")))
-	nav.add_child(_nav_button("Journal", func() -> void: navigation_requested.emit("history")))
+	nav.add_child(_nav_button("History", func() -> void: navigation_requested.emit("history")))
 	nav.add_child(_nav_button("Settings", func() -> void: navigation_requested.emit("settings")))
 	var motto := _hud_label("“From simple agents…\nto complex civilizations.”", 12, Color("b8c7cc"))
 	_motto = motto
@@ -366,6 +367,8 @@ func _build_command_hud() -> void:
 	motto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	motto.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header_row.add_child(motto)
+	var search_button := _command_button("Search…  Ctrl K", func() -> void: navigation_requested.emit("search"), Vector2(120, 32))
+	header_row.add_child(search_button)
 
 	var top_bar := PanelContainer.new()
 	_time_panel = top_bar
@@ -584,16 +587,7 @@ func _command_button(caption: String, callback: Callable, minimum_size: Vector2 
 
 
 func _bind_control_animation(control: Control) -> void:
-	control.mouse_entered.connect(func() -> void:
-		var tween := create_tween()
-		tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tween.tween_property(control, "modulate", Color("c8fff2"), 0.12)
-	)
-	control.mouse_exited.connect(func() -> void:
-		var tween := create_tween()
-		tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tween.tween_property(control, "modulate", Color.WHITE, 0.18)
-	)
+	preload("res://scripts/ui/AtlasTheme.gd").apply_to(control)
 
 
 func _animate_hud_entry() -> void:
@@ -616,6 +610,7 @@ func _on_primary_transport_pressed() -> void:
 func _nav_button(caption: String, callback: Callable, active: bool = false) -> Button:
 	var button := Button.new()
 	button.text = caption
+	button.set_meta("mode", caption.to_lower())
 	button.custom_minimum_size = Vector2(76, 40)
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.toggle_mode = true
@@ -631,6 +626,11 @@ func _nav_button(caption: String, callback: Callable, active: bool = false) -> B
 	_bind_control_animation(button)
 	button.pressed.connect(callback)
 	return button
+
+
+func select_navigation(mode: String) -> void:
+	for button: BaseButton in _nav_group.get_buttons():
+		button.set_pressed_no_signal(str(button.get_meta("mode", "")) == mode)
 
 
 func _footer_label(caption: String) -> Label:
@@ -651,10 +651,11 @@ func _hud_label(caption: String, font_size: int, color: Color) -> Label:
 
 func _panel_style(background: Color, border: Color, radius: int) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(background.r * 0.65 + 0.045, background.g * 0.65 + 0.035, background.b * 0.45 + 0.025, 0.97)
-	style.border_color = Color(border.r * 0.6 + 0.13, border.g * 0.5 + 0.1, border.b * 0.3 + 0.07)
+	style.bg_color = Color("101f2af5").lerp(background, 0.12)
+	style.border_color = Color("355766").lerp(border, 0.3)
 	style.set_border_width_all(1)
-	style.set_corner_radius_all(mini(radius, 8))
+	style.set_corner_radius_all(mini(radius, 5))
+	style.border_width_left = 2
 	style.shadow_color = Color(0, 0, 0, 0.28)
 	style.shadow_size = 5
 	return style
@@ -712,10 +713,10 @@ func _apply_responsive_layout() -> void:
 		return
 	var viewport_size := get_viewport_rect().size
 	_motto.visible = viewport_size.x >= 1500.0
-	_brand.custom_minimum_size.x = 220.0
-	_brand.visible = viewport_size.x >= 850.0
+	_brand.custom_minimum_size.x = 180.0
+	_brand.visible = viewport_size.x >= 1100.0
 	_main_header.get_child(0).alignment = BoxContainer.ALIGNMENT_CENTER
-	_main_header.get_child(0).add_theme_constant_override("separation", 20)
+	_main_header.get_child(0).add_theme_constant_override("separation", 8)
 	_overview_scroll.position = Vector2(18, 132)
 	_overview_scroll.size = Vector2(234, maxf(140, viewport_size.y - 154))
 	_command_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -731,7 +732,9 @@ func _apply_responsive_layout() -> void:
 func _on_settings_item_pressed(item_id: int) -> void:
 	match item_id:
 		1:
-			new_world_requested.emit()
+			# World creation now lives in Settings so destructive generation always
+			# shows its dimensions, seed and confirmation before replacing state.
+			navigation_requested.emit("settings")
 		2:
 			reload_requested.emit()
 		3:

@@ -47,3 +47,31 @@ class SocialGroup(BaseModel):
     home_y: int
     formed_at_tick: int = Field(ge=0)
     shared_resources: dict[str, float] = Field(default_factory=dict)
+
+
+class Household(BaseModel):
+    """Citizens sharing one completed home and its finite beds."""
+
+    id: UUID = Field(default_factory=uuid4)
+    group_id: UUID
+    home_structure_id: UUID
+    member_ids: list[UUID] = Field(default_factory=list)
+    bed_capacity: int = Field(ge=1)
+    created_at_tick: int = Field(ge=0)
+
+
+class SettlementJob(BaseModel):
+    """A persistent, inspectable request claimed by at most one citizen."""
+
+    id: UUID = Field(default_factory=uuid4)
+    group_id: UUID | None = None
+    job_type: str = Field(min_length=1, max_length=48)
+    target_id: str | None = None
+    material: str | None = None
+    amount: float = Field(default=0.0, ge=0.0)
+    priority: float = Field(default=0.5, ge=0.0, le=2.0)
+    reason: str
+    created_at_tick: int = Field(ge=0)
+    claimed_by: UUID | None = None
+    claimed_at_tick: int | None = Field(default=None, ge=0)
+    status: str = "open"

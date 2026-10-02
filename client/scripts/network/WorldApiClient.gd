@@ -22,6 +22,7 @@ var _request_kind: String = "world"
 var _chunk_queue: Array[Vector2i] = []
 var _requested_chunks: Dictionary = {}
 var _active_chunk := Vector2i.ZERO
+var _generation_options: Dictionary = {}
 
 func _ready() -> void:
 	if backend_url.is_empty():
@@ -46,16 +47,18 @@ func fetch_world() -> void:
 		_request_in_flight = true
 
 
-## Requests a completely new backend-owned world with a random seed.
-func generate_new_world() -> void:
+## Requests a completely new backend-owned world. Generation is deterministic
+## when a seed is supplied; omitting it asks the backend for a secure random seed.
+func generate_new_world(options: Dictionary = {}) -> void:
 	if _request_in_flight:
 		return
+	_generation_options = sanitize_generation_options(options)
 	_is_generating = true
 	_request_kind = "generate"
 	_chunk_queue.clear()
 	_requested_chunks.clear()
 	var err = _http_request.request(
-		backend_url + "/generate",
+		generation_url(backend_url, _generation_options),
 		PackedStringArray(),
 		HTTPClient.METHOD_POST
 	)
@@ -63,6 +66,28 @@ func generate_new_world() -> void:
 		_handle_failure("Failed to request a new world (Error code %d)" % err)
 	else:
 		_request_in_flight = true
+
+
+static func sanitize_generation_options(options: Dictionary) -> Dictionary:
+	var sanitized := {
+		"width": clampi(int(options.get("width", 64)), 8, 128),
+		"height": clampi(int(options.get("height", 64)), 8, 128),
+	}
+	if options.has("seed") and options["seed"] != null:
+		sanitized["seed"] = clampi(int(options["seed"]), 0, 2147483647)
+	var avatar_id := str(options.get("avatar_id", "scout"))
+	if avatar_id in ["scout", "builder", "herbalist", "scholar", "cook", "miner", "fisher", "artisan"]:
+		sanitized["avatar_id"] = avatar_id
+	return sanitized
+
+
+static func generation_url(base_url: String, options: Dictionary) -> String:
+	var safe := sanitize_generation_options(options)
+	var url := "%s/generate?width=%d&height=%d" % [base_url, safe.width, safe.height]
+	if safe.has("seed"):
+		url += "&seed=%d" % int(safe.seed)
+	url += "&player_avatar=%s" % str(safe.get("avatar_id", "scout"))
+	return url
 
 
 func request_chunk(chunk_position: Vector2i) -> void:
@@ -115,7 +140,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			_retry_count += 1
 			print("Request failed. Retrying... (%d/%d)" % [_retry_count, max_retries])
 			if _is_generating:
-				generate_new_world()
+				generate_new_world(_generation_options)
 			else:
 				fetch_world()
 		else:

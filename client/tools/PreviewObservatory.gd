@@ -26,7 +26,10 @@ func _preview() -> void:
 	var hud = template.get_node("UI/DebugPanel")
 	hud.get_parent().remove_child(hud)
 	template.free()
-	root.add_child(hud)
+	var interface_layer := CanvasLayer.new()
+	root.add_child(interface_layer)
+	interface_layer.add_child(hud)
+	preload("res://scripts/ui/AtlasTheme.gd").apply_to(hud)
 	hud.update_status(true)
 	hud.update_world_info("preview fixture", 30, 30, 16, 42, 900, resources.size())
 	await create_timer(0.8).timeout

@@ -25,6 +25,7 @@ class ResourceService:
         ResourceType.CLAY: "clay",
         ResourceType.CACTUS: "food",
         ResourceType.HERB: "herb",
+        ResourceType.CARCASS: "meat",
     }
     CRAFTING_RECIPES: dict[str, dict[str, float]] = {
         "stone_axe": {"wood": 2.0, "stone": 3.0},
@@ -66,6 +67,12 @@ class ResourceService:
         resource = self._resource(resource_id)
         if not resource.is_reserved(current_tick) or resource.reserved_by != actor_id:
             raise ValueError("Actor must own an active reservation before gathering.")
+        # Registered citizens must physically reach the node. Unbound actor
+        # labels remain supported by the low-level resource administration API.
+        if actor_id in self._require_world().entities:
+            self._require_actor_in_reach(actor_id, resource)
+            if resource.resource_type == ResourceType.TREE:
+                raise ValueError("Chop the tree, then collect its fallen logs.")
         inventory = self.inventory_for(actor_id)
         available_capacity = max(0.0, inventory.capacity - inventory.carried)
         requested = min(amount, available_capacity)

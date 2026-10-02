@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://cxworldscene"]
 
-[ext_resource type="Script" uid="uid://c0o1tvg2pjabq" path="res://scripts/world/World.gd" id="1_world"]
-[ext_resource type="Script" uid="uid://ccmfssx3xogmv" path="res://scripts/world/WorldRenderer.gd" id="2_renderer"]
+[ext_resource type="Script" uid="uid://dnkrvkjp0d4yw" path="res://scripts/world/World.gd" id="1_world"]
+[ext_resource type="Script" uid="uid://kifly2ihf3nr" path="res://scripts/world/WorldRenderer.gd" id="2_renderer"]
 [ext_resource type="Script" path="res://scripts/world/WeatherOverlay.gd" id="4_weather"]
 
 [node name="World" type="Node2D" unique_id=1839398204]

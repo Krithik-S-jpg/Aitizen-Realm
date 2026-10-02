@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from app.domain.models.needs import NeedsState
 from app.domain.models.society import Profession
@@ -16,6 +16,19 @@ class EntityKind(StrEnum):
     AGENT = "AGENT"
     ANIMAL = "ANIMAL"
     OBJECT = "OBJECT"
+
+
+class CitizenAvatar(StrEnum):
+    """Stable visual identities selectable for citizen characters."""
+
+    SCOUT = "scout"
+    BUILDER = "builder"
+    HERBALIST = "herbalist"
+    SCHOLAR = "scholar"
+    COOK = "cook"
+    MINER = "miner"
+    FISHER = "fisher"
+    ARTISAN = "artisan"
 
 
 class Entity(BaseModel):
@@ -34,6 +47,12 @@ class Entity(BaseModel):
     profession: Profession = Profession.GENERALIST
     skills: dict[str, float] = Field(default_factory=dict)
     group_id: UUID | None = None
+    avatar_id: CitizenAvatar = CitizenAvatar.SCOUT
+
+    @field_serializer("tags", when_used="json")
+    def serialize_tags(self, value: set[str]) -> list[str]:
+        """Stable ordering keeps checkpoint and live snapshots reproducible."""
+        return sorted(value)
 
     def distance_squared_to(self, x: int, y: int) -> int:
         """Returns squared tile distance without floating-point operations."""

@@ -73,3 +73,28 @@ def test_metrics_experiments_and_export_share_one_timeline() -> None:
     assert exported["world"]["seed"] == 42
     assert exported["experiments"][0]["status"] == "ACTIVE"
     assert exported["metrics"][0]["tick"] == 1
+    assert len(exported["groups"]) == 1
+    assert len(exported["groups"][0]["member_ids"]) == 2
+    assert exported["economy"]["inventories"] == 2
+    assert exported["economy"]["structures"] == 0
+    events = analytics.events()
+    assert any(event.event_type == "society" for event in events)
+    assert any(item["type"] == "society" for item in exported["timeline"])
+
+
+def test_analytics_derives_birth_sleep_and_weather_events() -> None:
+    """Notifications are derived from state transitions and expose map context."""
+    entities, _, analytics = _systems()
+    citizen = entities.create(EntityKind.AGENT, "Dreamer", 9, 11)
+    citizen.metadata.update({"birth_tick": 1, "sleeping_since_tick": 1})
+
+    analytics.capture(1)
+    citizen.metadata.update({"woke_at_tick": 24})
+    analytics.capture(24)
+
+    events = analytics.events()
+    kinds = {event.event_type for event in events}
+    assert {"birth", "sleep", "wake", "weather"} <= kinds
+    sleep = next(event for event in events if event.event_type == "sleep")
+    assert (sleep.x, sleep.y) == (9, 11)
+    assert [event.sequence for event in events] == list(range(len(events)))

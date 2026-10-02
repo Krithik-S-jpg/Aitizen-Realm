@@ -71,6 +71,10 @@ class NavigationService:
                 continue
             entity.x = next_x
             entity.y = next_y
+            if entity.kind == EntityKind.AGENT:
+                tile.metadata["foot_traffic"] = min(
+                    1000, int(tile.metadata.get("foot_traffic", 0)) + 1
+                )
             plan.next_step_index += 1
             plan.last_advanced_tick = tick
             if plan.next_step_index >= len(plan.path):
@@ -114,8 +118,14 @@ class NavigationService:
         blocked.update(
             (site.x, site.y)
             for site in world.structures.values()
-            if site.completed and site.structure_type != StructureType.CAMPFIRE
+            if site.completed
+            and site.structure_type not in {StructureType.CAMPFIRE, StructureType.ROAD}
         )
+        roads = {
+            (site.x, site.y)
+            for site in world.structures.values()
+            if site.completed and site.structure_type == StructureType.ROAD
+        }
         while frontier:
             _, current = heapq.heappop(frontier)
             if current == goal:
@@ -130,7 +140,9 @@ class NavigationService:
                     or neighbor in blocked
                 ):
                     continue
-                new_cost = cost_so_far[current] + tile.movement_cost
+                new_cost = cost_so_far[current] + (
+                    0.75 if neighbor in roads else tile.movement_cost
+                )
                 warning = entity.metadata.get("wildlife_warning", {})
                 if warning.get("expires", -1) >= entity.metadata.get(
                     "decision_tick", 0
@@ -144,8 +156,8 @@ class NavigationService:
                     cost_so_far[neighbor] = new_cost
                     priority = (
                         new_cost
-                        + abs(goal[0] - neighbor[0])
-                        + abs(goal[1] - neighbor[1])
+                        + (abs(goal[0] - neighbor[0]) + abs(goal[1] - neighbor[1]))
+                        * 0.75
                     )
                     heapq.heappush(frontier, (priority, neighbor))
                     came_from[neighbor] = current
@@ -187,7 +199,8 @@ class NavigationService:
             structure.x == x
             and structure.y == y
             and structure.completed
-            and structure.structure_type != StructureType.CAMPFIRE
+            and structure.structure_type
+            not in {StructureType.CAMPFIRE, StructureType.ROAD}
             for structure in world.structures.values()
         )
 

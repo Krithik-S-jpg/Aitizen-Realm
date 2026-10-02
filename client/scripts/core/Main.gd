@@ -18,6 +18,8 @@ extends Node2D
 @onready var entity_client: EntityApiClient = $EntityApiClient
 @onready var minimap: WorldMinimap = $UI/WorldMinimap
 @onready var analysis_panel: AnalysisPanel = $UI/AnalysisPanel
+@onready var settings_panel: SimulationSettingsPanel = $UI/SimulationSettingsPanel
+@onready var event_overlay: WorldEventOverlay = $UI/WorldEventOverlay
 @onready var research_client: ResearchApiClient = $ResearchApiClient
 
 var _parsed_world: Dictionary = {}
@@ -28,6 +30,8 @@ var _chunk_check_elapsed: float = 0.0
 var _player_entity: Dictionary = {}
 var _follow_player := true
 var _tracked_entity_id := ""
+var _tick_rate := 1.0
+var _last_world_event_sequence := -1
 
 func _ready() -> void:
 	# Wire up connection and parsing signals
@@ -48,9 +52,20 @@ func _ready() -> void:
 	hud.admin_requested.connect(_open_admin)
 	hud.crafting_requested.connect(crafting_panel.toggle_panel)
 	hud.observation_layer_requested.connect(world_scene.renderer.set_observation_layer)
+	hud.navigation_requested.connect(_on_navigation_requested)
 	simulation_client.state_received.connect(_on_simulation_state_received)
 	simulation_client.simulation_event_received.connect(_on_simulation_event_received)
 	simulation_client.request_failed.connect(_on_simulation_request_failed)
+	simulation_client.environment_received.connect(_on_environment_received)
+	settings_panel.apply_requested.connect(_on_settings_apply_requested)
+	settings_panel.reset_requested.connect(_on_settings_reset_requested)
+	settings_panel.new_world_requested.connect(_on_new_world_requested)
+	settings_panel.pause_requested.connect(func() -> void: simulation_client.send_command("pause"))
+	settings_panel.world_restored.connect(func() -> void:
+		_on_reload_requested()
+		simulation_client.fetch_state()
+		simulation_client.fetch_environment()
+		entity_client.fetch_overview())
 	actions_client.connect(
 		"blueprints_received", Callable(crafting_panel, "display_blueprints")
 	)
@@ -61,6 +76,7 @@ func _ready() -> void:
 	admin_panel.create_agent_requested.connect(entity_client.create_agent)
 	admin_panel.remove_agent_requested.connect(entity_client.remove_agent)
 	admin_panel.refresh_requested.connect(entity_client.fetch_overview)
+	admin_panel.focus_requested.connect(_focus_camera_at)
 	entity_client.overview_received.connect(admin_panel.display_agents)
 	entity_client.overview_received.connect(_on_live_entities_received)
 	entity_client.entity_created.connect(_on_agent_created)
@@ -68,8 +84,11 @@ func _ready() -> void:
 	entity_client.request_failed.connect(admin_panel.display_error)
 	minimap.navigate_requested.connect(_focus_camera_at)
 	analysis_panel.refresh_requested.connect(research_client.fetch_observation)
+	analysis_panel.focus_requested.connect(_focus_camera_at)
 	research_client.observation_received.connect(analysis_panel.display_observation)
+	research_client.world_events_received.connect(_on_world_events_received)
 	research_client.request_failed.connect(analysis_panel.display_error)
+	event_overlay.navigate_requested.connect(_focus_camera_at)
 
 	# Initial request on start
 	_on_reload_requested()
@@ -157,23 +176,8 @@ func _on_world_loaded(parsed_world: Dictionary) -> void:
 			int(_parsed_world["width"]),
 			int(_parsed_world["height"])
 		)
-
-	# Center the camera on the generated map using get_used_rect() and map_to_local()
-	var renderer = world_scene.renderer
-	if renderer:
-		var rect = renderer.get_used_rect()
-		var center_tile = rect.position + rect.size / 2
-		var target_global_pos = renderer.map_to_local(center_tile)
-
-		$Camera2D.global_position = target_global_pos
-
-		# Position Camera2D so the complete 20x20 isometric world is visible on startup
-		var target_zoom = 0.8
-		$Camera2D.zoom = Vector2(target_zoom, target_zoom)
-		if "_target_zoom" in $Camera2D:
-			$Camera2D._target_zoom = target_zoom
-
-		print("Camera centered on world center using get_used_rect(): %s, pixel position: %s" % [str(center_tile), str(target_global_pos)])
+	if settings_panel.visible:
+		settings_panel.display_world_created(_parsed_world)
 
 	# Update debug labels
 	hud.update_status(true)
@@ -198,20 +202,22 @@ func _on_reload_requested() -> void:
 	api_client.fetch_world()
 
 
-func _on_new_world_requested() -> void:
+func _on_new_world_requested(options: Dictionary = {}) -> void:
 	hud.update_status(true)
 	inspector.hide_inspector()
 	world_scene.renderer.clear_selection()
 	_has_centered_camera = false
 	_loaded_chunks.clear()
-	api_client.generate_new_world()
+	api_client.generate_new_world(options)
 
 
 func _on_simulation_state_received(state: Dictionary) -> void:
 	var engine_state := str(state.get("state", "UNKNOWN"))
-	world_scene.renderer.set_simulation_running(engine_state.to_upper() == "RUNNING")
+	world_scene.set_simulation_running(engine_state.to_upper() == "RUNNING")
 	var tick := int(state.get("current_tick", state.get("tick", 0)))
 	var tick_rate := float(state.get("tick_rate", 1.0))
+	_tick_rate = tick_rate
+	world_scene.renderer.set_simulation_tick_rate(tick_rate)
 	hud.update_simulation(engine_state, tick, tick_rate)
 	hud.update_system_health(state.get("world_health", {}))
 	_apply_calendar(state.get("calendar", {}))
@@ -231,12 +237,59 @@ func _on_simulation_event_received(event: Dictionary) -> void:
 		api_client.fetch_world()
 	elif event_name == "tick:completed" and tick % 2 == 0:
 		api_client.fetch_resources()
-	if event_name == "tick:completed" and tick % 2 == 0:
+	if event_name == "tick:completed":
 		entity_client.fetch_overview()
+		if tick % 2 == 0:
+			research_client.fetch_events(_last_world_event_sequence)
 
 
 func _on_simulation_request_failed(error_message: String) -> void:
 	push_warning(error_message)
+	if settings_panel.visible:
+		settings_panel.display_error(error_message)
+
+
+func _on_navigation_requested(mode: String) -> void:
+	# UIManager owns ordinary page navigation; this handler owns environment controls.
+	if mode != "settings":
+		settings_panel.close_panel()
+	match mode:
+		"settings":
+			settings_panel.open_panel(_calendar_state, _tick_rate, _parsed_world)
+			simulation_client.fetch_environment()
+		"world":
+			admin_panel.close_page()
+			analysis_panel.close_panel()
+			settings_panel.close_panel()
+
+
+func _on_settings_apply_requested(settings: Dictionary, tick_rate: float, visual_quality: String) -> void:
+	_tick_rate = tick_rate
+	world_scene.set_visual_quality(visual_quality)
+	simulation_client.set_tick_rate(tick_rate)
+	simulation_client.set_environment(settings)
+
+
+func _on_settings_reset_requested() -> void:
+	simulation_client.reset_environment()
+	simulation_client.fetch_environment()
+
+
+func _on_environment_received(data: Dictionary) -> void:
+	settings_panel.display_environment(data)
+	_apply_calendar(data.get("calendar", {}))
+
+
+func _on_world_events_received(events: Array) -> void:
+	if events.is_empty():
+		return
+	event_overlay.display_events(events)
+	for event_value: Variant in events:
+		if event_value is Dictionary:
+			_last_world_event_sequence = maxi(
+				_last_world_event_sequence,
+				int((event_value as Dictionary).get("sequence", -1))
+			)
 
 
 func _focus_camera_on_world() -> void:
@@ -350,7 +403,7 @@ func _on_live_entities_received(entities: Array) -> void:
 	_parsed_world["entities"] = entities.duplicate(true)
 	world_scene.renderer.update_entities(entities)
 	inspector.refresh_entities(entities, int(_parsed_world.get("chunk_size", 16)))
-	minimap.update_world(_parsed_world)
+	minimap.update_entities(entities)
 	_update_player_entity()
 
 
@@ -372,6 +425,7 @@ func _on_live_structures_received(structures: Array) -> void:
 		return
 	_parsed_world["structures"] = structures
 	world_scene.renderer.update_structures(structures)
+	minimap.update_structures(structures)
 	inspector.refresh_structures(structures)
 
 
@@ -383,7 +437,7 @@ func _open_admin() -> void:
 
 
 func _on_agent_created(entity: Dictionary) -> void:
-	admin_panel.operation_complete("Created %s" % str(entity.get("name", "agent")))
+	admin_panel.operation_complete("Created %s at (%s, %s)" % [entity.get("name", "agent"), entity.get("x", 0), entity.get("y", 0)])
 	api_client.fetch_world()
 
 

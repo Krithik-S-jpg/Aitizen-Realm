@@ -1,10 +1,13 @@
 """Tests for deterministic day, night, and season progression."""
 
 from app.domain.models.calendar import (
+    CalendarControl,
     DayPhase,
     Season,
     WeatherType,
     calendar_at_tick,
+    configure_calendar_control,
+    reset_calendar_control,
 )
 
 
@@ -37,3 +40,36 @@ def test_weather_follows_calendar_and_season() -> None:
     assert 0.0 <= calendar_at_tick(0).cloud_cover <= 1.0
     assert calendar_at_tick(0).pressure_hpa > 900.0
     assert 0.0 <= calendar_at_tick(0).daylight <= 1.0
+
+
+def test_runtime_controls_override_clock_and_climate_then_reset() -> None:
+    """Operator controls affect authoritative snapshots and remain reversible."""
+    try:
+        configure_calendar_control(
+            10,
+            CalendarControl(
+                ticks_per_day=48,
+                day_start_hour=7,
+                night_start_hour=22,
+                season_override=Season.WINTER,
+                weather_override=WeatherType.SNOW,
+                weather_intensity_override=0.9,
+                temperature_override_c=-12,
+                wind_speed_override=18,
+                wind_direction_override=270,
+                precipitation_radius_override=24,
+            ),
+            current_hour=23,
+        )
+        snapshot = calendar_at_tick(10)
+        assert snapshot.hour == 23
+        assert snapshot.phase == DayPhase.NIGHT
+        assert snapshot.season == Season.WINTER
+        assert snapshot.weather == WeatherType.SNOW
+        assert snapshot.weather_intensity == 0.9
+        assert snapshot.temperature_c == -12
+        assert snapshot.wind_speed == 18
+        assert snapshot.wind_direction == 270
+        assert snapshot.precipitation_radius == 24
+    finally:
+        reset_calendar_control()

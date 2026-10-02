@@ -104,6 +104,10 @@ func display_entity_info(entity: Dictionary, chunk_size: int) -> void:
 	label_title.text = "%s · %s" % [str(metadata.get("species", "Animal")).capitalize() if animal else "Citizen", str(entity.get("name", "Unknown"))]
 	label_pos.text = "Position: (%d, %d)   Chunk: (%d, %d)" % [x, y, floori(float(x) / chunk_size), floori(float(y) / chunk_size)]
 	label_chunk.text = "NOW  %s" % str(entity.get("action", metadata.get("state", "idle"))).replace("_", " ").to_upper()
+	if animal:
+		label_chunk.text += " · %s · DAY %d" % [str(metadata.get("age_stage", "unknown")).to_upper(), int(metadata.get("age_days", 0))]
+	elif metadata.has("life_stage"):
+		label_chunk.text += " · %s · AGE %d" % [str(metadata["life_stage"]).to_upper(), int(metadata.get("age_days", 0)) / 365]
 	var lines := PackedStringArray()
 	for key: String in ["health", "energy", "hunger", "thirst"]:
 		lines.append("%s: %s" % [key.capitalize(), "%.0f / 100" % float(needs[key]) if needs.has(key) else "Unavailable"])
@@ -111,11 +115,24 @@ func display_entity_info(entity: Dictionary, chunk_size: int) -> void:
 	label_terrain.custom_minimum_size.y = 76
 	var target: Dictionary = entity.get("action_target", {})
 	label_id.text = "Target: (%s, %s)" % [target["x"], target["y"]] if target.has("x") and target.has("y") else "Target: not reported"
+	if animal:
+		label_id.text += "\n" + str(metadata.get("lifestyle", "Lifestyle not yet observed."))
+		if metadata.has("home_x") and metadata.has("home_y"):
+			label_id.text += "\nHome territory: (%s, %s)" % [metadata["home_x"], metadata["home_y"]]
+		if metadata.has("mother_id"):
+			label_id.text += "\nFamily: offspring with a recorded parent"
+		if metadata.has("seasonal_state"):
+			label_id.text += "\nSeasonal activity: " + str(metadata["seasonal_state"]).capitalize()
 	if not animal:
 		label_id.text += "\nGoal: %s" % str(entity.get("goal", "idle")).replace("_", " ")
 		label_id.text += "\nWork progress: %.0f%%" % (float(entity.get("action_progress", 0.0)) * 100)
-		if not str(entity.get("decision_reason", "")).is_empty():
-			label_id.text += "\nWhy: " + str(entity["decision_reason"])
+	var route: Array = entity.get("route", [])
+	if not route.is_empty():
+		label_id.text += "\nRoute: %d steps · %s" % [route.size(), str(entity.get("route_status", "moving"))]
+	if bool(entity.get("indoors", false)):
+		label_id.text += "\nResting in assigned shelter"
+	if not str(entity.get("decision_reason", "")).is_empty():
+		label_id.text += "\nWhy: " + str(entity["decision_reason"])
 	var inventory: Dictionary = entity["inventory"] if entity.get("inventory") is Dictionary else {}
 	var items: Dictionary = inventory.get("items", {})
 	var contents := PackedStringArray()

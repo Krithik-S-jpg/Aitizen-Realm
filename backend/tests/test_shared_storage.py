@@ -5,6 +5,7 @@ import pytest
 from app.application.services.construction_service import ConstructionService
 from app.domain.models.cognition import ActionType, TaskStatus
 from app.domain.models.entity import EntityKind
+from app.domain.models.resource import ResourceNode, ResourceType
 from app.domain.models.structure import Structure, StructureType
 from tests.test_decisions import _systems
 
@@ -76,3 +77,51 @@ def test_citizen_walks_to_known_storage_for_recipe_material() -> None:
     assert abs(agent.x - store.x) + abs(agent.y - store.y) == 1
     assert world.inventories[str(agent.id)].carried > 0
     assert world.inventories[str(agent.id)].carried + store.stockpile.carried == 20
+
+
+def test_tree_to_ground_log_to_storage_to_finished_shelter() -> None:
+    """Timber crosses real world and inventory boundaries exactly once."""
+    entities, decisions, _ = _systems()
+    harvester = entities.create(EntityKind.AGENT, "Harvester", 5, 5)
+    builder = entities.create(EntityKind.AGENT, "Builder", 5, 5)
+    world = decisions._require_world()  # noqa: SLF001
+    resources = decisions._resources  # noqa: SLF001
+    construction = decisions._construction  # noqa: SLF001
+    tree = ResourceNode(
+        resource_type=ResourceType.TREE, x=6, y=5, quantity=30, capacity=30
+    )
+    world.add_resource(tree)
+    resources.chop(tree.id, str(harvester.id), 30, 1)
+    timber = next(
+        node
+        for node in world.resources.values()
+        if node.resource_type == ResourceType.LOG
+    )
+    assert world.inventories[str(harvester.id)].carried == 0
+    assert tree.visual_state == "fallen" and timber.quantity == 30
+    resources.reserve(timber.id, str(harvester.id), 2, 10)
+    resources.gather(timber.id, str(harvester.id), 20, 2)
+    store = Structure(
+        structure_type=StructureType.STORAGE,
+        x=5,
+        y=6,
+        builder_id=str(builder.id),
+        work_required=1,
+        progress=1,
+    )
+    world.structures[str(store.id)] = store
+    construction.transfer_storage(store.id, str(harvester.id), "wood", 20)
+    construction.transfer_storage(store.id, str(builder.id), "wood", 20, True)
+    stone = ResourceNode(
+        resource_type=ResourceType.STONE, x=4, y=5, quantity=5, capacity=5
+    )
+    world.add_resource(stone)
+    resources.reserve(stone.id, str(builder.id), 3, 10)
+    resources.gather(stone.id, str(builder.id), 5, 3)
+    site = construction.place(str(builder.id), StructureType.SHELTER, 5, 4)
+    assert world.inventories[str(builder.id)].carried == 0
+    assert store.stockpile.carried == 0
+    while not site.completed:
+        construction.apply_work(site.id, str(builder.id), 2)
+    assert site.completed and stone.depleted
+    assert timber.quantity == 10

@@ -16,17 +16,49 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from pydantic import BaseModel, Field
 
 from app.application.services.engine_service import EngineService
 from app.application.services.world_service import WorldService
 from app.domain.interfaces.event_bus import IEventBus
-from app.domain.models.calendar import calendar_at_tick
+from app.domain.models.calendar import (
+    CalendarControl,
+    Season,
+    WeatherType,
+    calendar_at_tick,
+    configure_calendar_control,
+    get_calendar_control,
+    reset_calendar_control,
+)
 from app.domain.models.engine import Event
 from app.infrastructure.api.dependencies import get_engine_service, get_world_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class EnvironmentControlRequest(BaseModel):
+    """Complete operator-facing clock and climate configuration."""
+
+    ticks_per_day: int = Field(default=24, ge=12, le=480)
+    current_hour: int | None = Field(default=None, ge=0, le=23)
+    day_start_hour: int = Field(default=8, ge=2, le=12)
+    night_start_hour: int = Field(default=20, ge=16, le=23)
+    season_override: Season | None = None
+    weather_override: WeatherType | None = None
+    weather_intensity_override: float | None = Field(default=None, ge=0, le=1)
+    temperature_override_c: float | None = Field(default=None, ge=-60, le=60)
+    wind_speed_override: float | None = Field(default=None, ge=0, le=40)
+    wind_direction_override: float | None = Field(default=None, ge=0, lt=360)
+    precipitation_radius_override: int | None = Field(default=None, ge=2, le=64)
+
+
+def _environment_payload(tick: int) -> dict[str, Any]:
+    return {
+        "control": get_calendar_control().model_dump(mode="json"),
+        "calendar": calendar_at_tick(tick).model_dump(mode="json"),
+    }
 
 
 class ConnectionManager:
@@ -147,6 +179,43 @@ def get_state(
         "calendar": calendar_at_tick(tick.value).model_dump(mode="json"),
         "world_health": world_service.get_health_snapshot(),
     }
+
+
+@router.get("/environment", response_model=dict[str, Any])
+def get_environment_controls(
+    engine_service: EngineService = Depends(get_engine_service),
+) -> dict[str, Any]:
+    """Returns authoritative clock and climate controls with their live result."""
+    return _environment_payload(engine_service.get_current_tick().value)
+
+
+@router.post("/environment", response_model=dict[str, Any])
+def set_environment_controls(
+    request: EnvironmentControlRequest,
+    engine_service: EngineService = Depends(get_engine_service),
+) -> dict[str, Any]:
+    """Updates runtime clock, season, and weather without faking client state."""
+    tick = engine_service.get_current_tick().value
+    control = CalendarControl.model_validate(
+        request.model_dump(exclude={"current_hour"})
+    )
+    try:
+        configure_calendar_control(tick, control, request.current_hour)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+    return {"message": "Environment controls updated", **_environment_payload(tick)}
+
+
+@router.delete("/environment", response_model=dict[str, Any])
+def reset_environment_controls(
+    engine_service: EngineService = Depends(get_engine_service),
+) -> dict[str, Any]:
+    """Returns clock and weather generation to deterministic automatic mode."""
+    reset_calendar_control()
+    tick = engine_service.get_current_tick().value
+    return {"message": "Environment controls reset", **_environment_payload(tick)}
 
 
 @router.post("/start", response_model=dict[str, Any])

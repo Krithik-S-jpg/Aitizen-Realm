@@ -1,0 +1,10 @@
+{
+  "deer":   {"maturity_days": 18, "lifespan_days": 420, "gestation_days": 14, "litter_min": 1, "litter_max": 2, "breeding_seasons": ["SPRING", "SUMMER"], "local_capacity": 10, "territory_radius": 10, "meat_yield": 20},
+  "rabbit": {"maturity_days": 7,  "lifespan_days": 150, "gestation_days": 5,  "litter_min": 2, "litter_max": 4, "breeding_seasons": ["SPRING", "SUMMER", "AUTUMN"], "local_capacity": 18, "territory_radius": 7, "meat_yield": 4},
+  "boar":   {"maturity_days": 20, "lifespan_days": 360, "gestation_days": 16, "litter_min": 1, "litter_max": 3, "breeding_seasons": ["SPRING", "SUMMER"], "local_capacity": 8, "territory_radius": 10, "meat_yield": 24},
+  "wolf":   {"maturity_days": 30, "lifespan_days": 480, "gestation_days": 18, "litter_min": 1, "litter_max": 3, "breeding_seasons": ["SPRING"], "local_capacity": 5, "territory_radius": 14, "meat_yield": 18},
+  "fox":    {"maturity_days": 18, "lifespan_days": 300, "gestation_days": 12, "litter_min": 1, "litter_max": 3, "breeding_seasons": ["SPRING", "SUMMER"], "local_capacity": 7, "territory_radius": 11, "meat_yield": 8},
+  "bear":   {"maturity_days": 45, "lifespan_days": 720, "gestation_days": 28, "litter_min": 1, "litter_max": 2, "breeding_seasons": ["SPRING"], "local_capacity": 3, "territory_radius": 16, "meat_yield": 40},
+  "goat":   {"maturity_days": 20, "lifespan_days": 420, "gestation_days": 15, "litter_min": 1, "litter_max": 2, "breeding_seasons": ["SPRING", "SUMMER"], "local_capacity": 9, "territory_radius": 10, "meat_yield": 16},
+  "duck":   {"maturity_days": 9,  "lifespan_days": 210, "gestation_days": 7,  "litter_min": 2, "litter_max": 4, "breeding_seasons": ["SPRING", "SUMMER"], "local_capacity": 14, "territory_radius": 8, "meat_yield": 5}
+}

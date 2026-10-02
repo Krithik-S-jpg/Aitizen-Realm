@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 from app.application.services.world_generator import WorldGenerator
 from app.domain.interfaces.world_repository import IWorldRepository
 from app.domain.models.calendar import Season, WeatherType, calendar_at_tick
-from app.domain.models.entity import Entity, EntityKind, EntityKnowledge
+from app.domain.models.entity import CitizenAvatar, Entity, EntityKind, EntityKnowledge
 from app.domain.models.inventory import Inventory
 from app.domain.models.needs import NeedsState
 from app.domain.models.resource import ResourceType
@@ -31,7 +31,11 @@ class WorldService:
         self._repository = repository
 
     def create_world(
-        self, width: int = 20, height: int = 20, seed: int = 847291
+        self,
+        width: int = 20,
+        height: int = 20,
+        seed: int = 847291,
+        player_avatar: CitizenAvatar = CitizenAvatar.SCOUT,
     ) -> World:
         """Generates and persists a fresh deterministic terrain world.
 
@@ -39,6 +43,7 @@ class WorldService:
             width: Width of the world in tiles.
             height: Height of the world in tiles.
             seed: Deterministic procedural generation seed.
+            player_avatar: Selected visual identity for the starting citizen.
 
         Returns:
             The newly created World instance.
@@ -46,7 +51,7 @@ class WorldService:
         logger.info("Service request: Creating world of size %dx%d...", width, height)
         world = WorldGenerator.generate_terrain_world(width, height, seed)
         self._spawn_animals(world)
-        self._spawn_player_agent(world)
+        self._spawn_player_agent(world, player_avatar)
         self._repository.save(world)
         return world
 
@@ -58,8 +63,16 @@ class WorldService:
         """
         return self._repository.get()
 
+    def restore_world(self, world: World) -> None:
+        """Install a validated snapshot without generating replacement entities."""
+        self._repository.save(world)
+
     def reset_world(
-        self, width: int = 20, height: int = 20, seed: int = 847291
+        self,
+        width: int = 20,
+        height: int = 20,
+        seed: int = 847291,
+        player_avatar: CitizenAvatar = CitizenAvatar.SCOUT,
     ) -> World:
         """Resets the simulation map, purging current state and generating fresh.
 
@@ -67,13 +80,14 @@ class WorldService:
             width: New world width in tiles.
             height: New world height in tiles.
             seed: Deterministic procedural generation seed.
+            player_avatar: Selected visual identity for the starting citizen.
 
         Returns:
             The fresh World instance.
         """
         logger.info("Service request: Resetting world...")
         self._repository.delete()
-        return self.create_world(width, height, seed)
+        return self.create_world(width, height, seed, player_avatar)
 
     def advance_resources(self, tick: int) -> None:
         """Advances all biological resource growth by one simulation tick."""
@@ -92,8 +106,21 @@ class WorldService:
             Season.AUTUMN: 0.55,
             Season.WINTER: 0.12,
         }[calendar.season]
-        for resource in world.resources.values():
+        expired: list[str] = []
+        for resource_id, resource in world.resources.items():
             resource.is_reserved(tick)
+            if resource.resource_type == ResourceType.CARCASS:
+                resource.quantity = max(
+                    0.0, resource.quantity - max(0.02, resource.capacity / 96.0)
+                )
+                resource.visual_state = (
+                    "decaying"
+                    if resource.quantity < resource.capacity * 0.5
+                    else "fresh"
+                )
+                if resource.depleted:
+                    expired.append(resource_id)
+                continue
             resource.advance_growth(weather_multiplier * season_multiplier)
             if resource.resource_type.value == "TREE":
                 if (
@@ -109,6 +136,8 @@ class WorldService:
                 elif resource.visual_state == "sapling" and resource.growth >= 0.70:
                     resource.visual_state = "standing"
                     resource.state_changed_tick = tick
+        for resource_id in expired:
+            world.resources.pop(resource_id, None)
 
     def get_health_snapshot(self) -> dict[str, int | float]:
         """Returns aggregate world health metrics for observers and HUD clients."""
@@ -235,7 +264,9 @@ class WorldService:
                     "home_x": tile.x,
                     "home_y": tile.y,
                     "sex": "female" if animal_id.int % 2 == 0 else "male",
-                    "age_stage": "adult" if animal_id.int % 5 else "young",
+                    "age_stage": "adult" if animal_id.int % 5 else "juvenile",
+                    "age_ticks": (4 + animal_id.int % 60) * 24,
+                    "birth_tick": -(4 + animal_id.int % 60) * 24,
                     "herd_id": f"{species}:{tile.x // 8}:{tile.y // 8}",
                     "foraged": 0.0,
                     "meals": 0,
@@ -316,7 +347,9 @@ class WorldService:
                 add_animal(species, anchor)
 
     @staticmethod
-    def _spawn_player_agent(world: World) -> Entity:
+    def _spawn_player_agent(
+        world: World, avatar_id: CitizenAvatar = CitizenAvatar.SCOUT
+    ) -> Entity:
         """Creates the single autonomous player-focus agent on a safe central tile."""
         center_x = world.width // 2
         center_y = world.height // 2
@@ -374,6 +407,7 @@ class WorldService:
             y=spawn.y,
             perception_radius=12,
             tags={"autonomous", "player"},
+            avatar_id=avatar_id,
             needs=NeedsState(),
         )
         key = str(player.id)

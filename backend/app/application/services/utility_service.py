@@ -17,12 +17,20 @@ class UtilityService:
         """Orders useful projects from current pressure, not a fixed tech sequence."""
         needs = entity.needs
         scores = {
-            StructureType.SHELTER: 0.6,
+            StructureType.SHELTER: (
+                0.95 if entity.metadata.get("homeless", False) else 0.6
+            ),
+            StructureType.TENT: (
+                0.80 if entity.metadata.get("homeless", False) else 0.15
+            ),
             StructureType.CAMPFIRE: 0.3,
             StructureType.STORAGE: inventory.carried / inventory.capacity,
             StructureType.WORKBENCH: 0.2,
             StructureType.WELL: (needs.thirst / 100.0 if needs else 0.0),
-            StructureType.FARM: (needs.hunger / 100.0 if needs else 0.0),
+            StructureType.FARM: max(
+                needs.hunger / 100.0 if needs else 0.0,
+                float(entity.metadata.get("community_hunger", 0)) / 100.0,
+            ),
         }
         if needs and needs.body_temperature_c < 36.5:
             scores[StructureType.CAMPFIRE] = 1.0
@@ -38,7 +46,8 @@ class UtilityService:
             return []
         needs = entity.needs
         carried_edible = sum(
-            inventory.items.get(item, 0.0) for item in ("food", "fruit", "mushroom")
+            inventory.items.get(item, 0.0)
+            for item in ("food", "fruit", "mushroom", "meat")
         )
         food_bonus = 0.12 if carried_edible > 0.0 else 0.0
         axe_recipe = {"wood": 2.0, "stone": 3.0}
@@ -74,10 +83,24 @@ class UtilityService:
             ),
             None,
         )
-        can_build_structure = next_structure is not None and inventory.has(
+        free_capacity = max(0.0, inventory.capacity - inventory.carried)
+        has_full_recipe = next_structure is not None and inventory.has(
             next_structure[1]
         )
-        free_capacity = max(0.0, inventory.capacity - inventory.carried)
+        has_partial_recipe = (
+            next_structure is not None
+            and free_capacity >= inventory.capacity * 0.15
+            and any(
+                inventory.items.get(material, 0.0) > 0.0
+                for material in next_structure[1]
+            )
+        )
+        can_start_structure = has_full_recipe or has_partial_recipe
+        has_basic_tool = any(
+            inventory.items.get(item, 0.0) >= 1.0
+            for item in ("stone_axe", "stone_pickaxe")
+        )
+        build_score = 0.82 if has_full_recipe else (0.68 if has_basic_tool else 0.48)
         options = [
             UtilityOption(
                 goal_type=GoalType.SATISFY_THIRST,
@@ -114,17 +137,18 @@ class UtilityService:
             ),
             UtilityOption(
                 goal_type=GoalType.CRAFT,
-                score=0.74 if can_craft_tool else 0.0,
+                score=0.80 if can_craft_tool else 0.0,
                 reason="Materials are available for the next useful tool."
                 if can_craft_tool
                 else "No useful tool recipe is currently affordable.",
             ),
             UtilityOption(
                 goal_type=GoalType.BUILD,
-                score=0.82 if can_build_structure else 0.0,
+                score=build_score if can_start_structure else 0.0,
                 reason=(
-                    f"Materials are ready for a {next_structure[0]}."
-                    if can_build_structure and next_structure is not None
+                    f"Start a {next_structure[0]} foundation and deliver "
+                    "carried supplies."
+                    if can_start_structure and next_structure is not None
                     else "Materials for the next settlement structure are incomplete."
                 ),
             ),

@@ -3,14 +3,16 @@
 from uuid import UUID
 
 from app.application.services.construction_service import ConstructionService
+from app.application.services.danger_memory import sheltered
 from app.application.services.goal_action_service import GoalActionService
 from app.application.services.navigation_service import NavigationService
 from app.application.services.needs_service import NeedsService
 from app.application.services.perception_service import PerceptionService
 from app.application.services.resource_service import ResourceService
+from app.application.services.society_service import SocietyService
 from app.application.services.utility_service import UtilityService
 from app.domain.interfaces.world_repository import IWorldRepository
-from app.domain.models.calendar import DayPhase, calendar_at_tick
+from app.domain.models.calendar import DayPhase, calendar_at_tick, get_calendar_control
 from app.domain.models.cognition import (
     Action,
     ActionType,
@@ -59,6 +61,21 @@ class DecisionService:
             for key, site in world.structures.items()
         )
         for option in options:
+            if option.goal_type == GoalType.EXPLORE and self._social_target(
+                world, entity
+            ):
+                option.score = max(option.score, 0.72)
+                option.reason = (
+                    "Needs are met; spend a short evening break with a neighbour."
+                )
+            if (
+                option.goal_type == GoalType.BUILD
+                and inventory.has(ConstructionService.BLUEPRINTS[StructureType.ROAD][0])
+                and self._road_target(world, entity) is not None
+            ):
+                if option.score < 0.7:
+                    option.score = 0.7
+                    option.reason = "Pave a frequently used route with carried stone."
             if (
                 option.goal_type == GoalType.REST
                 and entity.needs
@@ -106,6 +123,8 @@ class DecisionService:
                 option.reason = (
                     "Dangerous wildlife was seen nearby; move away and warn neighbours."
                 )
+                if entity.metadata.get("fear_memory_id") and entity.metadata.get("wildlife_warning", {}).get("expires", -1) >= entity.metadata.get("decision_tick", 0):
+                    option.reason = "Remembered a recent wildlife attack; avoid its location and seek safety."
             if (
                 option.goal_type == GoalType.SEEK_SAFETY
                 and entity.needs
@@ -137,7 +156,23 @@ class DecisionService:
             return active
         self._perception.observe(entity.id, tick)
         entity.metadata["decision_tick"] = tick
+        neighbours = [
+            other
+            for other in world.entities.values()
+            if other.active
+            and other.kind == EntityKind.AGENT
+            and other.needs
+            and entity.distance_squared_to(other.x, other.y)
+            <= entity.perception_radius**2
+        ]
+        entity.metadata["community_hunger"] = (
+            sum(other.needs.hunger for other in neighbours if other.needs)
+            / len(neighbours)
+            if neighbours
+            else 0.0
+        )
         selected: tuple[UtilityOption, ActionType, dict[str, object]] | None = None
+        trace: list[dict[str, object]] = []
         for option in self.evaluate(entity.id):
             try:
                 action_type, target = self._action_for(world, entity, option.goal_type)
@@ -158,12 +193,33 @@ class DecisionService:
                         UUID(str(target["resource_id"])), str(entity.id), tick, 20
                     )
                 selected = (option, action_type, target)
+                trace.append(
+                    {
+                        "goal": option.goal_type.value.lower(),
+                        "score": option.score,
+                        "reason": option.reason,
+                        "selected": True,
+                    }
+                )
                 break
-            except ValueError:
+            except ValueError as error:
+                trace.append(
+                    {
+                        "goal": option.goal_type.value.lower(),
+                        "score": option.score,
+                        "reason": option.reason,
+                        "selected": False,
+                        "blocked_by": str(error),
+                    }
+                )
                 continue
+        entity.metadata["decision_trace"] = trace
+        entity.metadata["last_decision_tick"] = tick
         if selected is None:
             raise ValueError("No utility option currently has a feasible action.")
         option, action_type, target = selected
+        entity.metadata.pop("blocked_reason", None)
+        entity.metadata["last_decision_reason"] = option.reason
         goal, action = self._lifecycle.start(
             entity,
             option.goal_type,
@@ -179,6 +235,7 @@ class DecisionService:
     def advance_all(self, tick: int) -> None:
         """Advances active actions, then decides for idle autonomous agents."""
         world = self._require_world()
+        calendar = calendar_at_tick(tick)
         autonomous = sorted(
             (
                 entity
@@ -189,6 +246,15 @@ class DecisionService:
             ),
             key=lambda item: str(item.id),
         )
+        # Release work owned by dead/removed citizens before assigning new work.
+        for actor_id in list(world.active_actions):
+            actor = world.entities.get(actor_id)
+            if actor is None or not actor.active:
+                abandoned = self._lifecycle.active(UUID(actor_id))
+                if abandoned is not None:
+                    self._lifecycle.fail(
+                        *abandoned, tick, "Worker is no longer active."
+                    )
         for entity in autonomous:
             self._perception.observe(entity.id, tick)
             entity.metadata["decision_tick"] = tick
@@ -204,6 +270,42 @@ class DecisionService:
                     if entity.distance_squared_to(neighbour.x, neighbour.y) <= 36:
                         neighbour.metadata["wildlife_warning"] = warning.copy()
             active = self._lifecycle.active(entity.id)
+            sleep_window = calendar.phase == DayPhase.NIGHT
+            if sleep_window and self._follow_night_routine(
+                world, entity, active, threats, tick
+            ):
+                continue
+            # Reaching here means dawn OR a survival emergency interrupted sleep.
+            if entity.metadata.get("state") in {
+                "sleep",
+                "seek_shelter",
+            }:
+                plan = world.movement_plans.get(str(entity.id))
+                if plan is not None and plan.status == MovementStatus.MOVING:
+                    plan.status = MovementStatus.CANCELLED
+                entity.metadata.update({"state": "idle", "woke_at_tick": tick})
+                entity.metadata.pop("sleeping_since_tick", None)
+                entity.metadata.pop("sheltered_sleep", None)
+                entity.metadata.pop("indoors", None)
+                entity.metadata.pop("sleep_home_id", None)
+                entity.metadata.pop("night_destination", None)
+                entity.metadata.pop("suspended_action", None)
+                if active is not None and {"x", "y"} <= active[1].target.keys():
+                    destination = (
+                        int(str(active[1].target["x"])),
+                        int(str(active[1].target["y"])),
+                    )
+                    if destination != (entity.x, entity.y):
+                        try:
+                            self._navigation.plan(entity.id, *destination, tick)
+                        except ValueError:
+                            self._lifecycle.fail(
+                                active[0],
+                                active[1],
+                                tick,
+                                "Suspended job could not be resumed after sleep.",
+                            )
+                            active = None
             if (
                 active
                 and entity.needs
@@ -255,6 +357,83 @@ class DecisionService:
                         continue
                 self._continue(world, entity, active[0], active[1], tick)
 
+    def _follow_night_routine(
+        self,
+        world: World,
+        entity: Entity,
+        active: tuple[Goal, Action] | None,
+        threats: list[tuple[int, int]],
+        tick: int,
+    ) -> bool:
+        """Moves a safe citizen to shelter and keeps them asleep until dawn."""
+        needs = entity.needs
+        if (
+            needs is None
+            or threats
+            or needs.hunger >= 82
+            or needs.thirst >= 82
+            or needs.health < 40
+            or needs.body_temperature_c < 35
+        ):
+            return False
+        if active is not None:
+            self._lifecycle.fail(
+                *active,
+                tick,
+                "Released work for the night; another citizen may claim it.",
+            )
+        plan = world.movement_plans.get(str(entity.id))
+        try:
+            safe = self._safe_target(world, entity)
+        except ValueError:
+            safe = {}
+        if safe.get("purpose") == "shelter" and (
+            int(str(safe["x"])),
+            int(str(safe["y"])),
+        ) != (
+            entity.x,
+            entity.y,
+        ):
+            destination = (int(str(safe["x"])), int(str(safe["y"])))
+            if (
+                plan is None
+                or plan.status != MovementStatus.MOVING
+                or (plan.destination_x, plan.destination_y) != destination
+            ):
+                try:
+                    self._navigation.plan(entity.id, *destination, tick)
+                except ValueError:
+                    safe = {}
+            if safe:
+                entity.metadata.update(
+                    {
+                        "state": "seek_shelter",
+                        "night_destination": list(destination),
+                        "sleep_home_id": safe.get("home_id"),
+                        "indoors": False,
+                        "last_decision_reason": "Night has arrived; walking to an available bed.",
+                    }
+                )
+                return True
+        if plan is not None and plan.status == MovementStatus.MOVING:
+            plan.status = MovementStatus.CANCELLED
+        needs.rest(4.0)
+        entity.metadata.update(
+            {
+                "state": "sleep",
+                "last_decision_reason": (
+                    "Night routine: recover energy until dawn "
+                    "unless survival needs interrupt."
+                ),
+                "sleeping_since_tick": entity.metadata.get("sleeping_since_tick", tick),
+                "sheltered_sleep": safe.get("purpose") == "shelter",
+                "sleep_home_id": safe.get("home_id"),
+                "sleep_bed_index": entity.metadata.get("bed_index"),
+                "indoors": bool(safe.get("home_id")),
+            }
+        )
+        return True
+
     def _begin(
         self, world: World, entity: Entity, goal: Goal, action: Action, tick: int
     ) -> None:
@@ -286,16 +465,20 @@ class DecisionService:
                 )
             elif action.action_type == ActionType.BUILD:
                 site_x, site_y = int(action.target["x"]), int(action.target["y"])
+                if "structure_id" in action.target:
+                    site = world.structures[str(action.target["structure_id"])]
+                    if abs(entity.x - site.x) + abs(entity.y - site.y) > 1:
+                        self._navigation.plan(entity.id, site_x, site_y, tick)
+                        return
+                    self._advance_building(entity, goal, action, tick)
+                    return
                 if abs(entity.x - site_x) + abs(entity.y - site_y) > 1:
                     self._navigation.plan(entity.id, site_x, site_y, tick)
-                    return
-                if "structure_id" in action.target:
-                    self._advance_building(entity, goal, action, tick)
                     return
                 structure_type = StructureType(
                     str(action.target["structure_type"]).upper()
                 )
-                structure = self._construction.place(
+                structure = self._construction.start_site(
                     str(entity.id),
                     structure_type,
                     int(action.target["x"]),
@@ -381,6 +564,31 @@ class DecisionService:
     def _finish_at_target(
         self, world: World, entity: Entity, goal: Goal, action: Action, tick: int
     ) -> None:
+        if "social_with" in action.target:
+            neighbour = world.entities.get(str(action.target["social_with"]))
+            if (
+                neighbour is None
+                or not neighbour.active
+                or entity.distance_squared_to(neighbour.x, neighbour.y) > 2
+            ):
+                raise ValueError("Neighbour moved away; reassess the social visit.")
+            entity.metadata["state"] = "socialize"
+            action.progress += 1
+            if action.progress < 2:
+                return
+            SocietyService(self._repository).register_interaction(
+                entity.id, neighbour.id, tick
+            )
+            SocietyService(self._repository).register_interaction(
+                neighbour.id, entity.id, tick
+            )
+            entity.metadata["last_social_tick"] = tick
+            neighbour.metadata["last_social_tick"] = tick
+            entity.metadata["state"] = "idle"
+            self._lifecycle.complete(
+                goal, action, tick, {"socialized_with": str(neighbour.id)}
+            )
+            return
         if "supply_site" in action.target:
             site = world.structures[str(action.target["supply_site"])]
             if abs(entity.x - site.x) + abs(entity.y - site.y) > 1:
@@ -512,10 +720,10 @@ class DecisionService:
     ) -> tuple[ActionType, dict[str, object]]:
         if goal_type == GoalType.SATISFY_HUNGER:
             inventory = world.inventories[str(entity.id)]
-            for item_type in ("fruit", "food", "mushroom"):
+            for item_type in ("fruit", "food", "mushroom", "meat"):
                 if inventory.items.get(item_type, 0.0) > 0.0:
                     return ActionType.EAT, {"item_type": item_type}
-            for item_type in ("fruit", "food", "mushroom"):
+            for item_type in ("fruit", "food", "mushroom", "meat"):
                 stored = self._storage_trip(world, entity, item_type, 3, True)
                 if stored:
                     return ActionType.MOVE, stored
@@ -531,9 +739,14 @@ class DecisionService:
             try:
                 return ActionType.PLUCK, self._fruit_target(world, entity)
             except ValueError:
-                return ActionType.GATHER, self._resource_target(
-                    world, entity, ResourceType.PLANT
-                )
+                try:
+                    return ActionType.GATHER, self._resource_target(
+                        world, entity, ResourceType.CARCASS
+                    )
+                except ValueError:
+                    return ActionType.GATHER, self._resource_target(
+                        world, entity, ResourceType.PLANT
+                    )
         if goal_type == GoalType.SATISFY_THIRST:
             if self._beside_water(world, entity):
                 return ActionType.DRINK, {}
@@ -581,7 +794,7 @@ class DecisionService:
                     > entity.perception_radius**2
                 ):
                     continue
-                for item in ("food", "fruit", "mushroom"):
+                for item in ("food", "fruit", "mushroom", "meat"):
                     if inventory.items.get(item, 0) >= 4:
                         return ActionType.MOVE, {
                             "share_with": str(neighbour.id),
@@ -616,6 +829,13 @@ class DecisionService:
             ):
                 if site.completed or str(site.id) not in knowledge.structures:
                     continue
+                missing = site.missing_materials
+                can_deliver = any(
+                    world.inventories[str(entity.id)].items.get(material, 0.0) > 0.0
+                    for material in missing
+                )
+                if missing and not can_deliver:
+                    continue
                 workers = sum(
                     1
                     for other in world.entities.values()
@@ -626,11 +846,13 @@ class DecisionService:
                 )
                 if workers >= 2:
                     continue
+                access = self._site_target(world, entity, site.id, "build")
                 return ActionType.BUILD, {
                     "structure_id": str(site.id),
                     "structure_type": site.structure_type.value.lower(),
-                    "x": site.x,
-                    "y": site.y,
+                    "x": access["x"],
+                    "y": access["y"],
+                    "purpose": "deliver" if missing else "build",
                 }
             inventory = world.inventories[str(entity.id)]
             existing = {
@@ -644,6 +866,30 @@ class DecisionService:
                     >= structure.stockpile.capacity * 0.9
                 )
             }
+            # Nearby workers announce planned projects even before foundations exist.
+            # This avoids several citizens simultaneously funding the same facility.
+            for other in world.entities.values():
+                if (
+                    other.id == entity.id
+                    or not other.active
+                    or entity.distance_squared_to(other.x, other.y)
+                    > entity.perception_radius**2
+                ):
+                    continue
+                job = self._lifecycle.active(other.id)
+                if job and job[1].action_type == ActionType.BUILD:
+                    kind = job[1].target.get("structure_type")
+                    if kind:
+                        existing.add(StructureType(str(kind).upper()))
+            road = self._road_target(world, entity)
+            if road is not None and inventory.has(
+                ConstructionService.BLUEPRINTS[StructureType.ROAD][0]
+            ):
+                return ActionType.BUILD, {
+                    "structure_type": "road",
+                    "x": road[0],
+                    "y": road[1],
+                }
             structure_type = next(
                 (
                     candidate
@@ -651,12 +897,17 @@ class DecisionService:
                         entity, inventory
                     )
                     if candidate not in existing
-                    and inventory.has(ConstructionService.BLUEPRINTS[candidate][0])
+                    and any(
+                        inventory.items.get(material, 0.0) > 0.0
+                        for material in ConstructionService.BLUEPRINTS[candidate][0]
+                    )
                 ),
                 None,
             )
             if structure_type is None:
-                raise ValueError("No new structure is currently affordable.")
+                raise ValueError(
+                    "No construction site needs this citizen's supplies or work."
+                )
             build_x, build_y = self._build_site(world, entity, structure_type)
             return ActionType.BUILD, {
                 "structure_type": structure_type.value.lower(),
@@ -689,8 +940,60 @@ class DecisionService:
                             return ActionType.CHOP, self._resource_target(
                                 world, entity, ResourceType.TREE
                             )
-            return ActionType.MOVE, self._safe_target(world, entity)
-        return ActionType.MOVE, self._exploration_target(world, entity)
+            safe = self._safe_target(world, entity)
+            if (
+                not self._threats(world, entity)
+                and entity.needs
+                and entity.needs.body_temperature_c < 36.5
+                and safe.get("purpose") != "shelter"
+            ):
+                # Exposed ground does not solve cold. Work toward real warmth.
+                try:
+                    return self._action_for(world, entity, GoalType.BUILD)
+                except ValueError:
+                    return self._action_for(world, entity, GoalType.GATHER)
+            if safe.get("purpose") == "safety" and (safe["x"], safe["y"]) == (
+                entity.x,
+                entity.y,
+            ):
+                raise ValueError(
+                    "Already on safe terrain; no safer destination is known."
+                )
+            return ActionType.MOVE, safe
+        social = self._social_target(world, entity)
+        return ActionType.MOVE, social or self._exploration_target(world, entity)
+
+    @staticmethod
+    def _social_target(world: World, entity: Entity) -> dict[str, object] | None:
+        tick = int(entity.metadata.get("decision_tick", 0))
+        needs = entity.needs
+        if (
+            needs is None
+            or needs.hunger >= 40
+            or needs.thirst >= 40
+            or needs.energy < 45
+            or needs.safety < 60
+            or needs.body_temperature_c < 36
+            or calendar_at_tick(tick).phase != DayPhase.DUSK
+            or tick - int(entity.metadata.get("last_social_tick", -10000))
+            < get_calendar_control().ticks_per_day
+        ):
+            return None
+        neighbours = sorted(
+            (
+                other
+                for other in world.entities.values()
+                if other.id != entity.id
+                and other.active
+                and other.kind == EntityKind.AGENT
+                and entity.distance_squared_to(other.x, other.y) <= 2
+                and other.metadata.get("state") != "sleep"
+            ),
+            key=lambda other: str(other.id),
+        )
+        if not neighbours:
+            return None
+        return {"social_with": str(neighbours[0].id), "x": entity.x, "y": entity.y}
 
     def _advance_building(
         self, entity: Entity, goal: Goal, action: Action, tick: int
@@ -700,7 +1003,27 @@ class DecisionService:
         if abs(entity.x - site.x) + abs(entity.y - site.y) > 1:
             raise ValueError("Builder must be beside the construction site.")
         inventory = self._require_world().inventories[str(entity.id)]
-        work_rate = 1.6 if inventory.items.get("stone_axe", 0.0) >= 1.0 else 1.0
+        delivered: dict[str, float] = {}
+        if site.missing_materials:
+            delivered = self._construction.deliver_materials(
+                structure_id, str(entity.id)
+            )
+            if site.missing_materials:
+                self._lifecycle.complete(
+                    goal,
+                    action,
+                    tick,
+                    {
+                        "phase": "delivery",
+                        "delivered": delivered,
+                        "still_needed": site.missing_materials,
+                        "structure_id": str(site.id),
+                    },
+                )
+                return
+        # Construction remains multi-tick work, but a normal daylight window is
+        # long enough to make visible progress before citizens sleep.
+        work_rate = 2.0 if inventory.items.get("stone_axe", 0.0) >= 1.0 else 1.5
         structure = self._construction.apply_work(
             structure_id, str(entity.id), work_rate
         )
@@ -715,12 +1038,14 @@ class DecisionService:
                 {
                     "structure_id": str(structure.id),
                     "built": structure.structure_type.value.lower(),
+                    "delivered": delivered,
                 },
             )
         else:
             action.result = {
                 "phase": "building",
                 "progress_ratio": action.progress_ratio,
+                "delivered": delivered,
             }
 
     @staticmethod
@@ -733,6 +1058,10 @@ class DecisionService:
             for key, resource in world.resources.items()
             if key in knowledge.resources
             and not resource.depleted
+            and (
+                not resource.is_reserved(int(entity.metadata.get("decision_tick", 0)))
+                or resource.reserved_by == str(entity.id)
+            )
             and (preferred is None or resource.resource_type == preferred)
         ]
         if not candidates:
@@ -748,6 +1077,14 @@ class DecisionService:
         """Chooses a known resource that advances the next survival milestone."""
         inventory = world.inventories[str(entity.id)]
         milestones: list[dict[str, float]] = []
+        unfinished_missing = [
+            site.missing_materials
+            for key, site in world.structures.items()
+            if key in world.entity_knowledge[str(entity.id)].structures
+            and not site.completed
+            and site.missing_materials
+        ]
+        milestones.extend(unfinished_missing)
         if inventory.carried >= inventory.capacity * 0.85:
             for material, amount in sorted(
                 inventory.items.items(), key=lambda item: -item[1]
@@ -795,6 +1132,8 @@ class DecisionService:
         )
         if next_structure is not None:
             milestones.append(ConstructionService.BLUEPRINTS[next_structure][0])
+        elif DecisionService._road_target(world, entity) is not None:
+            milestones.append(ConstructionService.BLUEPRINTS[StructureType.ROAD][0])
 
         resource_types = {
             "wood": {ResourceType.TREE, ResourceType.LOG, ResourceType.STUMP},
@@ -833,6 +1172,12 @@ class DecisionService:
                     for key, resource in world.resources.items()
                     if key in knowledge.resources
                     and not resource.depleted
+                    and (
+                        not resource.is_reserved(
+                            int(entity.metadata.get("decision_tick", 0))
+                        )
+                        or resource.reserved_by == str(entity.id)
+                    )
                     and resource.resource_type in resource_types.get(material, set())
                 ]
                 if material == "wood":
@@ -963,6 +1308,10 @@ class DecisionService:
             if key in knowledge.resources
             and resource.produce_type == "fruit"
             and resource.produce_quantity > 0.0
+            and (
+                not resource.is_reserved(int(entity.metadata.get("decision_tick", 0)))
+                or resource.reserved_by == str(entity.id)
+            )
         ]
         if not candidates:
             raise ValueError("No ripe known fruit tree is available.")
@@ -1031,12 +1380,14 @@ class DecisionService:
     def _threats(
         world: World, entity: Entity, include_warning: bool = True
     ) -> list[tuple[int, int]]:
+        if sheltered(world, entity):
+            return []
         threats = [
             (other.x, other.y)
             for other in world.entities.values()
             if other.active
             and other.kind == EntityKind.ANIMAL
-            and other.metadata.get("species") in {"wolf", "bear"}
+            and other.metadata.get("species") in {"wolf", "bear", "boar"}
             and entity.distance_squared_to(other.x, other.y)
             <= min(6, entity.perception_radius) ** 2
         ]
@@ -1067,6 +1418,47 @@ class DecisionService:
                     ),
                 )
                 return {"x": target.x, "y": target.y, "purpose": "avoid_wildlife"}
+        assigned_home_id = str(entity.metadata.get("assigned_home_id", ""))
+        assigned_home = world.structures.get(assigned_home_id)
+        if assigned_home is None:
+            available = [home for home in world.structures.values()
+                         if home.completed and home.structure_type in {StructureType.SHELTER, StructureType.TENT}
+                         and str(home.id) in knowledge.structures
+                         and len(home.resident_ids) < home.bed_capacity]
+            if available:
+                assigned_home = min(available, key=lambda home: (entity.distance_squared_to(home.x, home.y), str(home.id)))
+                assigned_home_id = str(assigned_home.id)
+                assigned_home.resident_ids.append(str(entity.id))
+                entity.metadata.update(assigned_home_id=assigned_home_id, bed_index=len(assigned_home.resident_ids) - 1, homeless=False)
+        if (
+            assigned_home is not None
+            and assigned_home.completed
+            and str(assigned_home.id) in knowledge.structures
+            and str(entity.id) in assigned_home.resident_ids
+        ):
+            bed_spots = [
+                (assigned_home.x + dx, assigned_home.y + dy)
+                for dx, dy in ((1, 0), (0, 1), (-1, 0), (0, -1))
+                if (
+                    tile := world.retrieve_tile(
+                        assigned_home.x + dx, assigned_home.y + dy
+                    )
+                )
+                is not None
+                and tile.walkable
+                and not NavigationService._structure_blocks(world, tile.x, tile.y)
+                and f"{assigned_home.x + dx},{assigned_home.y + dy}" in knowledge.tiles
+            ]
+            if bed_spots:
+                index = int(entity.metadata.get("bed_index", 0)) % len(bed_spots)
+                x, y = bed_spots[index]
+                return {
+                    "x": x,
+                    "y": y,
+                    "purpose": "shelter",
+                    "home_id": assigned_home_id,
+                    "bed_index": entity.metadata.get("bed_index", 0),
+                }
         shelters = [
             structure
             for structure in world.structures.values()
@@ -1109,6 +1501,40 @@ class DecisionService:
             raise ValueError("No known safer terrain is available.")
         target = min(safe, key=lambda item: entity.distance_squared_to(item.x, item.y))
         return {"x": target.x, "y": target.y, "purpose": "safety"}
+
+    @staticmethod
+    def _road_target(world: World, entity: Entity) -> tuple[int, int] | None:
+        """Pave observed busy routes only after citizens establish infrastructure."""
+        knowledge = world.entity_knowledge[str(entity.id)]
+        known_sites = [
+            site
+            for key, site in world.structures.items()
+            if key in knowledge.structures
+        ]
+        if not any(
+            site.completed and site.structure_type == StructureType.STORAGE
+            for site in known_sites
+        ):
+            return None
+        occupied = {(site.x, site.y) for site in world.structures.values()}
+        candidates = [
+            record
+            for record in knowledge.tiles.values()
+            if int(record.data.get("foot_traffic", 0)) >= 8
+            and record.data.get("walkable")
+            and (record.x, record.y) not in occupied
+            and not NavigationService._structure_blocks(world, record.x, record.y)
+        ]  # noqa: SLF001
+        if not candidates:
+            return None
+        chosen = min(
+            candidates,
+            key=lambda record: (
+                -int(record.data["foot_traffic"]),
+                entity.distance_squared_to(record.x, record.y),
+            ),
+        )
+        return chosen.x, chosen.y
 
     @staticmethod
     def _build_site(

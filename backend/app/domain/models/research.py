@@ -15,6 +15,15 @@ class ExperimentStatus(StrEnum):
     COMPLETED = "COMPLETED"
 
 
+class EventSeverity(StrEnum):
+    """Visual priority for observable events without changing simulation logic."""
+
+    INFO = "INFO"
+    SUCCESS = "SUCCESS"
+    WARNING = "WARNING"
+    DANGER = "DANGER"
+
+
 class Experiment(BaseModel):
     """A reproducible named experiment and its controlled parameters."""
 
@@ -38,3 +47,22 @@ class MetricsSnapshot(BaseModel):
     completed_structures: int = Field(ge=0)
     groups: int = Field(ge=0)
     communications: int = Field(ge=0)
+    wildlife_by_species: dict[str, int] = Field(default_factory=dict)
+    births: int = Field(default=0, ge=0)
+    deaths: int = Field(default=0, ge=0)
+
+
+class WorldEvent(BaseModel):
+    """One meaningful, backend-derived change in the living world."""
+
+    id: UUID = Field(default_factory=uuid4)
+    sequence: int = Field(default=0, ge=0)
+    tick: int = Field(ge=0)
+    event_type: str = Field(min_length=1, max_length=40)
+    severity: EventSeverity = EventSeverity.INFO
+    title: str = Field(min_length=1, max_length=80)
+    summary: str = Field(min_length=1, max_length=240)
+    entity_id: UUID | None = None
+    x: int | None = None
+    y: int | None = None
+    data: dict[str, Any] = Field(default_factory=dict)

@@ -22,6 +22,7 @@ class ConstructionService:
         StructureType.TORCH: ({"wood": 3.0, "fiber": 2.0}, 6.0),
         StructureType.FENCE: ({"wood": 5.0}, 8.0),
         StructureType.FARM: ({"wood": 6.0, "fiber": 4.0}, 24.0),
+        StructureType.ROAD: ({"stone": 2.0}, 6.0),
     }
     PROGRESSION = (
         StructureType.SHELTER,
@@ -40,6 +41,25 @@ class ConstructionService:
         self, actor_id: str, structure_type: StructureType, x: int, y: int
     ) -> Structure:
         """Consumes a recipe and places an unfinished structure site."""
+        world = self._require_world()
+        structure = self.start_site(actor_id, structure_type, x, y)
+        inventory = world.inventories.get(actor_id)
+        if inventory is None:
+            world.structures.pop(str(structure.id), None)
+            raise ValueError("Actor has no inventory.")
+        requirements = structure.materials_required
+        try:
+            inventory.consume(requirements)
+        except ValueError:
+            world.structures.pop(str(structure.id), None)
+            raise
+        structure.materials_delivered = requirements.copy()
+        return structure
+
+    def start_site(
+        self, actor_id: str, structure_type: StructureType, x: int, y: int
+    ) -> Structure:
+        """Places an unfunded foundation so supplies can arrive over several trips."""
         world = self._require_world()
         tile = world.retrieve_tile(x, y)
         if tile is None:
@@ -60,20 +80,48 @@ class ConstructionService:
             for structure in world.structures.values()
         ):
             raise ValueError("A structure already occupies this tile.")
-        inventory = world.inventories.get(actor_id)
-        if inventory is None:
-            raise ValueError("Actor has no inventory.")
         requirements, work_required = self.BLUEPRINTS[structure_type]
-        inventory.consume(requirements)
         structure = Structure(
             structure_type=structure_type,
             x=x,
             y=y,
             builder_id=actor_id,
             work_required=work_required,
+            materials_required=requirements.copy(),
+            bed_capacity={StructureType.SHELTER: 4, StructureType.TENT: 2}.get(
+                structure_type, 0
+            ),
         )
         world.structures[str(structure.id)] = structure
         return structure
+
+    def deliver_materials(self, structure_id: UUID, actor_id: str) -> dict[str, float]:
+        """Transfers only currently missing construction supplies from one pack."""
+        world = self._require_world()
+        site = self._structure(structure_id)
+        actor = world.entities.get(actor_id)
+        inventory = world.inventories.get(actor_id)
+        if site.completed:
+            raise ValueError(
+                "Completed structures no longer accept construction supplies."
+            )
+        if actor is None or not actor.active or inventory is None:
+            raise ValueError("An active citizen with an inventory is required.")
+        if abs(actor.x - site.x) + abs(actor.y - site.y) > 1:
+            raise ValueError("Citizen must be beside the construction site.")
+        delivered: dict[str, float] = {}
+        for material, missing in site.missing_materials.items():
+            amount = min(missing, inventory.items.get(material, 0.0))
+            if amount <= 0:
+                continue
+            inventory.consume({material: amount})
+            site.materials_delivered[material] = (
+                site.materials_delivered.get(material, 0.0) + amount
+            )
+            delivered[material] = amount
+        if not delivered:
+            raise ValueError("Citizen is not carrying a material this site needs.")
+        return delivered
 
     def apply_work(self, structure_id: UUID, actor_id: str, amount: float) -> Structure:
         """Applies bounded work to an unfinished construction site."""
@@ -82,6 +130,8 @@ class ConstructionService:
         structure = self._structure(structure_id)
         if structure.completed:
             raise ValueError("Structure is already complete.")
+        if not structure.funded:
+            raise ValueError("Construction site is waiting for delivered materials.")
         structure.apply_work(amount)
         return structure
 

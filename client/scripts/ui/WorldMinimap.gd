@@ -17,6 +17,8 @@ var _camera_position := Vector2i.ZERO
 var _terrain_colors: Dictionary = DEFAULT_TERRAIN_COLORS.duplicate()
 var _background := Color("071722f2")
 var _border := Color("376672")
+var _terrain_texture: ImageTexture
+var _terrain_cache_builds := 0
 
 
 func _ready() -> void:
@@ -27,6 +29,21 @@ func _ready() -> void:
 
 func update_world(world: Dictionary) -> void:
 	_world = world
+	_rebuild_terrain_texture()
+	queue_redraw()
+
+
+func update_entities(entities: Array) -> void:
+	if _world.is_empty():
+		return
+	_world["entities"] = entities
+	queue_redraw()
+
+
+func update_structures(structures: Array) -> void:
+	if _world.is_empty():
+		return
+	_world["structures"] = structures
 	queue_redraw()
 
 
@@ -44,14 +61,8 @@ func _draw() -> void:
 	var height := maxi(int(_world.get("height", 1)), 1)
 	var map_rect := Rect2(10, 24, size.x - 20, size.y - 34)
 	draw_rect(map_rect, Color("02080b"), true)
-	for coordinate: Vector2i in _world.get("tiles", {}):
-		var tile: Dictionary = _world["tiles"][coordinate]
-		var point := Vector2(
-			map_rect.position.x + float(coordinate.x) / width * map_rect.size.x,
-			map_rect.position.y + float(coordinate.y) / height * map_rect.size.y
-		)
-		var cell := Vector2(maxf(1.0, map_rect.size.x / width + 0.5), maxf(1.0, map_rect.size.y / height + 0.5))
-		draw_rect(Rect2(point, cell), _terrain_colors.get(str(tile.get("terrain", "grass")), Color("55736a")), true)
+	if _terrain_texture != null:
+		draw_texture_rect(_terrain_texture, map_rect, false)
 	for structure: Dictionary in _world.get("structures", []):
 		_draw_marker(map_rect, width, height, int(structure["x"]), int(structure["y"]), Color("efc05f"), 2.5)
 	for entity: Dictionary in _world.get("entities", []):
@@ -99,6 +110,28 @@ func _load_theme_config() -> void:
 	var colors: Dictionary = config.get("terrain_colors", {})
 	for terrain: Variant in colors:
 		_terrain_colors[str(terrain)] = Color(str(colors[terrain]))
+
+
+func _rebuild_terrain_texture() -> void:
+	var width := maxi(int(_world.get("width", 1)), 1)
+	var height := maxi(int(_world.get("height", 1)), 1)
+	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
+	image.fill(Color("02080b"))
+	for coordinate: Vector2i in _world.get("tiles", {}):
+		if coordinate.x < 0 or coordinate.y < 0 or coordinate.x >= width or coordinate.y >= height:
+			continue
+		var tile: Dictionary = _world["tiles"][coordinate]
+		image.set_pixel(
+			coordinate.x,
+			coordinate.y,
+			_terrain_colors.get(str(tile.get("terrain", "grass")).to_lower(), Color("55736a"))
+		)
+	_terrain_texture = ImageTexture.create_from_image(image)
+	_terrain_cache_builds += 1
+
+
+func get_terrain_cache_build_count() -> int:
+	return _terrain_cache_builds
 
 
 func _map_style() -> StyleBoxFlat:

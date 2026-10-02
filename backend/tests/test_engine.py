@@ -18,6 +18,48 @@ async def test_engine_initial_state(engine: LoopEngine) -> None:
 
 
 @pytest.mark.asyncio
+async def test_completed_tick_observers_see_finished_world(
+    engine: LoopEngine, event_bus: IEventBus
+) -> None:
+    """Publishing cannot race an async authoritative update."""
+    state: list[int] = []
+    observed: list[int] = []
+
+    async def advance(event: Event) -> None:
+        await asyncio.sleep(0)
+        state.append(event.tick)
+
+    async def observe(event: Event) -> None:
+        observed.extend(state)
+
+    event_bus.subscribe("tick:completed", observe)
+    engine.set_tick_processor(advance)
+    await engine.step()
+    assert observed == [1]
+
+
+@pytest.mark.asyncio
+async def test_failed_world_update_never_publishes_completion(
+    engine: LoopEngine, event_bus: IEventBus
+) -> None:
+    """Stop progress when the authoritative update fails."""
+    completed: list[int] = []
+
+    async def fail(event: Event) -> None:
+        raise ValueError("Update failed")
+
+    async def observe(event: Event) -> None:
+        completed.append(event.tick)
+
+    event_bus.subscribe("tick:completed", observe)
+    engine.set_tick_processor(fail)
+    with pytest.raises(ValueError, match="Update failed"):
+        await engine.step()
+    assert not completed
+    assert engine.get_state() == EngineState.PAUSED
+
+
+@pytest.mark.asyncio
 async def test_engine_invalid_tick_rate(engine: LoopEngine) -> None:
     """Tests that setting an invalid tick rate raises an exception."""
     with pytest.raises(ValueError):

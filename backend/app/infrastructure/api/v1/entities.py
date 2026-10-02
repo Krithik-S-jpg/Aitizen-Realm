@@ -15,7 +15,7 @@ from app.application.services.navigation_service import NavigationService
 from app.application.services.needs_service import NeedsService
 from app.application.services.perception_service import PerceptionService
 from app.application.services.society_service import SocietyService
-from app.domain.models.entity import Entity, EntityKind
+from app.domain.models.entity import CitizenAvatar, Entity, EntityKind
 from app.domain.models.memory import EpisodeType
 from app.infrastructure.api.dependencies import (
     get_communication_service,
@@ -41,6 +41,8 @@ class CreateEntityRequest(BaseModel):
     y: int
     perception_radius: int = Field(default=6, ge=1, le=32)
     tags: set[str] = Field(default_factory=set)
+    avatar_id: CitizenAvatar = CitizenAvatar.SCOUT
+    auto_spawn: bool = False
 
 
 class ObservationRequest(BaseModel):
@@ -104,6 +106,8 @@ def create_entity(
             request.y,
             request.perception_radius,
             request.tags,
+            request.avatar_id,
+            auto_spawn=request.auto_spawn,
         )
         return _entity_payload(entity)
     except (LookupError, ValueError) as error:

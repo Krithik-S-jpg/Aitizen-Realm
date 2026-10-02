@@ -1,0 +1,10 @@
+{
+  "deer": {"description": "Herd grazer; feeds in open ground and returns to cover to sleep.", "comfort_action": "ruminate", "comfort_interval": 11, "rest_gain": 2.0},
+  "rabbit": {"description": "Twilight forager; stays near its home and flees predators.", "comfort_action": "groom", "comfort_interval": 7, "rest_gain": 1.0},
+  "boar": {"description": "Night-time woodland rooter; travels socially and seeks moist habitat.", "comfort_action": "rest", "comfort_interval": 13, "rest_gain": 2.0},
+  "wolf": {"description": "Social night hunter; scavenges first, hunts when hungry, rests when fed.", "comfort_action": "rest", "comfort_interval": 17, "rest_gain": 3.0},
+  "fox": {"description": "Solitary twilight hunter of small prey; returns to its own territory.", "comfort_action": "groom", "comfort_interval": 13, "rest_gain": 1.0},
+  "bear": {"description": "Solitary omnivore; forages and scavenges, conserving energy in winter.", "comfort_action": "rest", "comfort_interval": 19, "rest_gain": 3.0},
+  "goat": {"description": "Social highland browser; feeds by day and rests near its home.", "comfort_action": "ruminate", "comfort_interval": 9, "rest_gain": 2.0},
+  "duck": {"description": "Water-edge flock forager; eats wetland plants and rests at night.", "comfort_action": "preen", "comfort_interval": 7, "rest_gain": 1.0}
+}

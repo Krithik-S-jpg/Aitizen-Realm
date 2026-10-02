@@ -42,6 +42,7 @@ class PerceptionService:
                     "y": y,
                     "terrain": tile.terrain.value.lower(),
                     "walkable": tile.walkable,
+                    "foot_traffic": int(tile.metadata.get("foot_traffic", 0)),
                 }
                 visible_tiles.append(payload)
                 key = f"{x},{y}"
@@ -135,6 +136,10 @@ class PerceptionService:
             "x": structure.x,
             "y": structure.y,
             "completed": structure.completed,
+            "funded": structure.funded,
+            "missing_materials": structure.missing_materials,
+            "bed_capacity": structure.bed_capacity,
+            "residents": len(structure.resident_ids),
             "storage_full": structure.stockpile.carried
             >= structure.stockpile.capacity * 0.9,
         }
