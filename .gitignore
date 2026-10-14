@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+/netlify-app/node_modules/
+/netlify-app/dist/
+/.netlify/
+/netlify-app/.netlify/
 /.pnp
 .pnp.*
 .yarn/*

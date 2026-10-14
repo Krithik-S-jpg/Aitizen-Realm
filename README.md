@@ -1,5 +1,11 @@
 # Aitizen Observatory
 
+## Netlify deployment
+
+See [NETLIFY.md](NETLIFY.md). The root `netlify.toml` selects the independent
+`netlify-app/` build with Netlify Functions, Blobs storage and owner-key login.
+The existing Sites target described below is retained, but is not used by Netlify.
+
 Standalone, owner-private monitoring website for Aitizen Realm. This repository
 has its own Git history and Sites deployment. It is not a game subproject.
 
