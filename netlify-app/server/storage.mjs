@@ -1,9 +1,13 @@
 import {getStore} from "@netlify/blobs";
-export function store(){// Isolate deploy previews so they cannot read or prune production records.
- const context=process.env.CONTEXT;
- if(!context)throw new Error("Use Netlify Dev or a Netlify deployment");
- const name=context==="production"?"aitizen-observatory-production": "aitizen-observatory-"+(process.env.DEPLOY_ID||"local");
- return getStore({name,consistency:"strong"});
+export function storeName(runtime){
+ // CONTEXT and DEPLOY_ID are build variables, not Functions runtime variables.
+ const deploy=runtime?.deploy;
+ if(deploy?.context==="production")return "aitizen-observatory-production";
+ if(!deploy?.context||!deploy?.id)throw new Error("Missing Netlify deployment context");
+ return "aitizen-observatory-"+deploy.id;
+}
+export function store(runtime,createStore=getStore){
+ return createStore({name:storeName(runtime),consistency:"strong"});
 }
 export const recordKey=(kind,id)=>kind+"/"+id;
 export async function put(db,kind,id,payload,created=Date.now()){await db.setJSON(recordKey(kind,id),{...payload,id,received_at:created})}

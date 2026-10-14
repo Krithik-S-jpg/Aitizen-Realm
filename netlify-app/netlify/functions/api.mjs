@@ -51,4 +51,4 @@ export async function handle(req,dbFactory=store,env=process.env){
   const id=randomUUID();await put(db,"question",id,{question,status:"pending",snapshot_tick:snapshot.tick});await trim(db,"question",100);return response({id,status:"pending"});
  }catch{return response({error:"Monitoring storage is temporarily unavailable. Retry shortly."},503)}
 }
-export default (req) => handle(req);
+export default (req,context) => handle(req,()=>store(context));
