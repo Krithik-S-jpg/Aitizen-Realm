@@ -31,6 +31,9 @@ class ResourceService:
         "stone_axe": {"wood": 2.0, "stone": 3.0},
         "stone_pickaxe": {"wood": 2.0, "stone": 4.0},
         "basket": {"fiber": 6.0},
+        "boat": {"wood": 20.0, "fiber": 8.0},
+        "fishing_rod": {"wood": 2.0, "fiber": 2.0},
+        "hunting_spear": {"wood": 3.0, "stone": 2.0, "fiber": 1.0},
         "clay_pot": {"clay": 6.0},
         "iron_knife": {"wood": 1.0, "ore": 4.0},
     }

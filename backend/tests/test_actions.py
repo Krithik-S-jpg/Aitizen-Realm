@@ -123,6 +123,8 @@ def test_live_scene_matches_world_without_retransmitting_tiles(
     assert response.json() == {
         "resources": world["resources"],
         "structures": world["structures"],
+        "flooded_tiles": [],
+        "weather_patches": [],
     }
 
 

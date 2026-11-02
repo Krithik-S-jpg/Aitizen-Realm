@@ -21,6 +21,14 @@ static func websocket_url(path: String) -> String:
 static func _config() -> Dictionary:
 	if not _cached.is_empty():
 		return _cached
+	if OS.has_feature("web"):
+		# Hosting supplies a public API origin, never a credential. Without an
+		# override use the site's origin for a same-origin reverse proxy.
+		var base: String = str(JavaScriptBridge.eval("window.AITIZEN_API_ORIGIN || window.location.origin", true)).trim_suffix("/")
+		if not base.begins_with("https://") and not base.begins_with("http://localhost:") and not base.begins_with("http://127.0.0.1:"):
+			base = str(JavaScriptBridge.eval("window.location.origin", true))
+		_cached = {"http_base_url": base, "websocket_base_url": base.replace("https://", "wss://").replace("http://", "ws://")}
+		return _cached
 	var file := FileAccess.open(CONFIG_PATH, FileAccess.READ)
 	if file == null:
 		return {"http_base_url": DEFAULT_HTTP_BASE}

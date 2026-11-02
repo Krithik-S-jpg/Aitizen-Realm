@@ -56,7 +56,9 @@ class CalendarSnapshot(BaseModel):
 class CalendarControl(BaseModel):
     """Runtime environment controls owned by the authoritative simulation."""
 
-    ticks_per_day: int = Field(default=24, ge=12, le=480)
+    ticks_per_day: int = Field(default=1800, ge=12, le=14400)
+    biological_days_per_day: float = Field(default=1.0, ge=0.0, le=365.0)
+    family_births_enabled: bool = False
     day_start_hour: int = Field(default=8, ge=2, le=12)
     night_start_hour: int = Field(default=20, ge=16, le=23)
     hour_offset: int = Field(default=0, ge=0, le=23)

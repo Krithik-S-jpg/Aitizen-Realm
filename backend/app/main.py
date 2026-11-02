@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.infrastructure.api.v1.observer import router as observer_router
 from app.infrastructure.api.dependencies import (
     get_engine_service,
     get_event_bus,
@@ -36,6 +37,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     event_bus = get_event_bus()
     await register_event_broadcaster(event_bus)
 
+    from app.application.services.recovery_service import restore_recovery
+    await restore_recovery()
+
     yield
 
     # 3. Shutdown cleanup (e.g. stop engine)
@@ -48,6 +52,7 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan,
 )
+app.include_router(observer_router, prefix=f"{settings.API_V1_STR}/observer", tags=["observer"])
 
 app.include_router(
     checkpoints_router,

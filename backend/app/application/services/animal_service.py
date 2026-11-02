@@ -124,6 +124,8 @@ class AnimalService:
         if world is None:
             return
         calendar = calendar_at_tick(tick)
+        from app.application.services.habitat_service import advance
+        advance(world, tick, calendar)
         for citizen in world.entities.values():
             if citizen.kind == EntityKind.AGENT:
                 citizen.metadata["emotion_tick"] = tick
@@ -139,10 +141,12 @@ class AnimalService:
             key=lambda item: str(item.id),
         )
         for animal in animals:
-            if not animal.active:
+            if not animal.active or animal.metadata.get("marine") or animal.metadata.get("cave_animal") or animal.metadata.get("species") == "songbird":
                 continue  # A predator may have killed this animal earlier this tick.
-            animal.metadata["weather"] = calendar.weather.value.lower()
-            animal.metadata["weather_intensity"] = calendar.weather_intensity
+            from app.application.services.editor_tools import local_weather
+            local = local_weather(world, animal.x, animal.y, calendar, tick)
+            animal.metadata["weather"] = local.weather.value.lower()
+            animal.metadata["weather_intensity"] = local.weather_intensity
             animal.metadata["ambient_temperature_c"] = calendar.feels_like_c
             cadence = min(2, max(1, int(animal.metadata.get("move_cadence", 1))))
             if tick % cadence != animal.id.int % cadence:
@@ -301,6 +305,7 @@ class AnimalService:
         for animal in list(world.entities.values()):
             if (
                 animal.kind == EntityKind.ANIMAL
+                and not animal.metadata.get("marine")
                 and not animal.active
                 and "death_tick" not in animal.metadata
             ):
@@ -378,6 +383,42 @@ class AnimalService:
         if needs is not None and needs.thirst >= 70:
             if self._drink_or_seek_water(world, animal, profile, tick):
                 return
+        animal.metadata.setdefault("migration_season", season.value)
+        if tick % get_calendar_control().ticks_per_day == 0 and animal.metadata.get("migration_season") != season.value and phase in profile["active"] and (needs is None or needs.energy >= 24):
+            animal.metadata["migration_season"] = season.value
+            leader = next((other for other in world.entities.values() if other.id != animal.id and other.active and other.metadata.get("species") == species and other.metadata.get("migration_season") == season.value and other.metadata.get("migration_reason") == "seasonal_food_water_and_prey" and other.metadata.get("migration_target") and animal.distance_squared_to(other.x, other.y) <= 144), None)
+            if profile["social"] and leader is not None:
+                animal.metadata.update(migration_target=list(leader.metadata["migration_target"]), migration_reason="seasonal_food_water_and_prey")
+                if self._step_toward(world, animal, *animal.metadata["migration_target"], "migrate", tick):
+                    return
+            if self._migrate(world, animal, profile, tick):
+                animal.metadata["migration_reason"] = "seasonal_food_water_and_prey"
+                return
+        target = animal.metadata.get("migration_target")
+        if target and animal.metadata.get("migration_reason") == "seasonal_food_water_and_prey" and animal.distance_squared_to(*target) > 2 and phase in profile["active"] and (needs is None or needs.energy >= 24):
+            if self._step_toward(world, animal, *target, "migrate", tick):
+                return
+        if tick % get_calendar_control().ticks_per_day == 0 and species in {"deer", "boar", "wolf", "fox", "bear"}:
+            hx, hy = animal.metadata["home_x"], animal.metadata["home_y"]
+            home_tile = world.retrieve_tile(hx, hy)
+            if home_tile and home_tile.terrain == TerrainType.FOREST and not any(r.resource_type == ResourceType.TREE and not r.depleted and (r.x-hx)**2 + (r.y-hy)**2 <= 9 for r in world.resources.values()):
+                old_home = world.ecology.get("homes", {}).get(animal.metadata.get("habitat_id"), {})
+                old_home["status"] = "abandoned"
+                if self._migrate(world, animal, profile, tick):
+                    animal.metadata["home_x"], animal.metadata["home_y"] = animal.metadata["migration_target"]
+                    animal.metadata["behavior_reason"] = "Tree cover around the old home was cleared."
+                    return
+        if species in {"deer", "rabbit", "boar", "goat"} and needs is not None and needs.hunger > 35:
+            farm = min((s for s in world.structures.values() if s.completed and s.structure_type == StructureType.FARM and s.crop_food >= 1 and animal.distance_squared_to(s.x, s.y) <= 64), key=lambda s: animal.distance_squared_to(s.x, s.y), default=None)
+            if farm is not None:
+                if animal.distance_squared_to(farm.x, farm.y) <= 2:
+                    farm.crop_food -= 1
+                    needs.hunger = max(0, needs.hunger - 15)
+                    self._set_state(animal, "graze", tick)
+                    animal.metadata["behavior_reason"] = "Feeding on actual farm crops."
+                    return
+                if self._step_toward(world, animal, farm.x, farm.y, "forage", tick):
+                    return
         # Water affinity is a continuing habitat need, not only a spawn rule.
         # Fear above can still drive a duck inland; it returns once safe.
         if species == "duck" and not self._terrain_near(

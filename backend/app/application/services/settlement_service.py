@@ -72,6 +72,10 @@ class SettlementService:
                 ),
             )
             for home in homes:
+                members.sort(key=lambda member_id: (
+                    world.entities[str(member_id)].metadata.get("assigned_home_id") != str(home.id),
+                    world.entities[str(member_id)].distance_squared_to(home.x, home.y), str(member_id)))
+                home.stockpile.capacity = max(50.0, home.stockpile.carried)
                 valid_home_ids.add(str(home.id))
                 household_candidate = next(
                     (
@@ -194,14 +198,16 @@ class SettlementService:
             if action is None:
                 continue
             target_id = str(
-                action.target.get("structure_id", action.target.get("supply_site", ""))
+                action.target.get("structure_id", action.target.get("community_site", action.target.get("supply_site", "")))
             )
             candidates = [
                 job
                 for job in world.settlement_jobs.values()
                 if job.status == "open" and job.target_id == target_id
             ]
-            if action.action_type == ActionType.BUILD:
+            if action.target.get("community_site"):
+                candidates = [job for job in candidates if job.material == action.target.get("material")]
+            elif action.action_type == ActionType.BUILD:
                 purpose = str(action.target.get("purpose", "build"))
                 candidates = [
                     job

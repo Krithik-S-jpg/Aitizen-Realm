@@ -33,40 +33,18 @@ class NeedsService:
                 and structure.crop_food < 12
             ):
                 if calendar.temperature_c > 3.0:
-                    structure.crop_growth = min(1.0, structure.crop_growth + 1.0 / 72.0)
+                    from app.application.services.regional_environment import growth_factor
+                    structure.crop_growth = min(1.0, structure.crop_growth + growth_factor(world.retrieve_tile(structure.x, structure.y)) / 72.0)
                 if structure.crop_growth >= 1.0:
                     structure.crop_food = 12.0
                     structure.crop_growth = 0.0
         for entity in world.entities.values():
             if not entity.active or entity.needs is None:
                 continue
-            if (
-                entity.kind == EntityKind.AGENT
-                and tick > 0
-                and tick % get_calendar_control().ticks_per_day == 0
-            ):
-                age_days = (
-                    int(
-                        entity.metadata.setdefault(
-                            "age_days", 18 * 365 + entity.id.int % (30 * 365)
-                        )
-                    )
-                    + 1
-                )
-                maximum_age = int(
-                    entity.metadata.setdefault(
-                        "maximum_age_days", 68 * 365 + entity.id.int % (24 * 365)
-                    )
-                )
-                entity.metadata["age_days"] = age_days
-                entity.metadata["life_stage"] = (
-                    "elder" if age_days >= 60 * 365 else "adult"
-                )
-                if age_days >= maximum_age:
-                    entity.active = False
-                    entity.metadata.update(
-                        {"death_tick": tick, "death_cause": "old_age", "state": "dead"}
-                    )
+            if entity.kind == EntityKind.AGENT:
+                from app.application.services.family_service import age_tick
+                age_tick(entity, tick)
+                if not entity.active:
                     continue
             tile = world.retrieve_tile(entity.x, entity.y)
             local_modifier = 0.0
@@ -123,17 +101,22 @@ class NeedsService:
                 )
 
     FOOD_EFFECTS = {
+        "cooked_meat": (24.0, 1.0, 0.0),
         "food": (8.0, 0.0, 0.0),
         "fruit": (12.0, 1.5, 3.0),
         "mushroom": (7.0, 0.0, 0.0),
         "herb": (5.0, 1.0, 0.0),
         "meat": (16.0, 1.0, 0.0),
+        "cooked_fish": (22.0, 1.0, 0.0),
     }
 
     def eat(self, entity_id: UUID, amount: float, item_type: str = "food") -> Entity:
         """Consumes a carried edible item and applies its physiological effects."""
         world = self._require_world()
         entity = self._living_entity(world, entity_id)
+        from app.application.services.diet import accepts
+        if not accepts(entity, item_type):
+            raise ValueError("This food does not match the citizen's diet.")
         if item_type not in self.FOOD_EFFECTS:
             raise ValueError("Item is not edible.")
         inventory = world.inventories[str(entity_id)]

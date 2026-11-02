@@ -28,6 +28,18 @@ func _ready() -> void:
 	hud.focus_mode_requested.connect(_set_focus_mode)
 	hud.overview_visibility_changed.connect(_set_overview_visible)
 	call_deferred("_apply_atlas_theme")
+	get_tree().node_added.connect(_theme_new_control)
+
+
+func _theme_new_control(node: Node) -> void:
+	if node is Control and get_parent().is_ancestor_of(node):
+		_theme_deferred.call_deferred(weakref(node))
+
+
+func _theme_deferred(reference: WeakRef) -> void:
+	var node: Node = reference.get_ref()
+	if is_instance_valid(node) and node.is_inside_tree():
+		preload("res://scripts/ui/AtlasTheme.gd").apply_to(node, false)
 
 
 func _apply_atlas_theme() -> void:
@@ -49,7 +61,7 @@ func _navigate(mode: String) -> void:
 		crafting.close_panel()
 	if mode != "citizens":
 		admin.close_page()
-	if mode not in ["animals", "buildings", "research", "history", "settlements", "economy"]:
+	if mode not in ["animals", "buildings", "research", "history", "settlements", "economy", "expeditions", "discoveries"]:
 		analysis.close_panel()
 	match mode:
 		"world":
@@ -58,7 +70,7 @@ func _navigate(mode: String) -> void:
 			hud.admin_requested.emit()
 		"build":
 			hud.crafting_requested.emit()
-		"animals", "buildings", "research", "history", "settlements", "economy":
+		"animals", "buildings", "research", "history", "settlements", "economy", "expeditions", "discoveries":
 			analysis.open_mode(mode)
 
 

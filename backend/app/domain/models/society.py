@@ -47,6 +47,10 @@ class SocialGroup(BaseModel):
     home_y: int
     formed_at_tick: int = Field(ge=0)
     shared_resources: dict[str, float] = Field(default_factory=dict)
+    village_story: list[dict] = Field(default_factory=list)
+    reserve_target: float = Field(default=0, ge=0)
+    last_village_day: int = Field(default=0, ge=0)
+    community_project: dict = Field(default_factory=dict)
 
 
 class Household(BaseModel):

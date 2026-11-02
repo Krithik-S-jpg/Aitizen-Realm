@@ -8,6 +8,8 @@ signal world_data_received(data: Dictionary)
 signal chunk_data_received(data: Dictionary)
 signal resources_data_received(resources: Array)
 signal structures_data_received(structures: Array)
+signal floods_received(tiles: Array)
+signal weather_patches_received(patches: Array)
 signal connection_failed(error_message: String)
 
 @export var backend_url: String = ""
@@ -23,6 +25,8 @@ var _chunk_queue: Array[Vector2i] = []
 var _requested_chunks: Dictionary = {}
 var _active_chunk := Vector2i.ZERO
 var _generation_options: Dictionary = {}
+var _reconnect_timer: Timer
+var _reconnect_delay := 2.0
 
 func _ready() -> void:
 	if backend_url.is_empty():
@@ -31,12 +35,17 @@ func _ready() -> void:
 	add_child(_http_request)
 	_http_request.request_completed.connect(_on_request_completed)
 	_http_request.timeout = request_timeout
+	_reconnect_timer = Timer.new()
+	_reconnect_timer.one_shot = true
+	add_child(_reconnect_timer)
+	_reconnect_timer.timeout.connect(fetch_world)
 
 ## Initiates a GET request to the specified backend URL.
 func fetch_world() -> void:
 	if _request_in_flight:
 		return
 	_is_generating = false
+	_http_request.timeout = maxf(request_timeout, 30.0)
 	_request_kind = "world"
 	_chunk_queue.clear()
 	_requested_chunks.clear()
@@ -54,6 +63,7 @@ func generate_new_world(options: Dictionary = {}) -> void:
 		return
 	_generation_options = sanitize_generation_options(options)
 	_is_generating = true
+	_http_request.timeout = 120.0
 	_request_kind = "generate"
 	_chunk_queue.clear()
 	_requested_chunks.clear()
@@ -131,6 +141,11 @@ func _pump_chunk_queue() -> void:
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	_request_in_flight = false
 	if result != HTTPRequest.RESULT_SUCCESS:
+		if _request_kind == "generate":
+			_is_generating = false
+			_http_request.timeout = maxf(request_timeout, 30.0)
+			_handle_failure("World creation response was not confirmed. Do not create again: use Reload world to retrieve the result.")
+			return
 		if _request_kind == "chunk":
 			_requested_chunks.erase(_active_chunk)
 			_handle_failure("Chunk request failed.")
@@ -165,6 +180,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		_retry_count = 0
 		resources_data_received.emit(data["resources"])
 		structures_data_received.emit(data["structures"])
+		floods_received.emit(data.get("flooded_tiles", []))
+		weather_patches_received.emit(data.get("weather_patches", []))
 		_pump_chunk_queue()
 		return
 	if typeof(data) != TYPE_DICTIONARY:
@@ -173,6 +190,9 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 
 	_retry_count = 0
 	_is_generating = false
+	_reconnect_delay = 2.0
+	_reconnect_timer.stop()
+	_http_request.timeout = maxf(request_timeout, 30.0)
 	if _request_kind == "chunk":
 		chunk_data_received.emit(data)
 		_pump_chunk_queue()
@@ -182,4 +202,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 
 func _handle_failure(error_msg: String) -> void:
 	_retry_count = 0
-	connection_failed.emit(error_msg)
+	# Reconcile with a read only; never replay world-creation POSTs.
+	if _reconnect_timer != null and _reconnect_timer.is_stopped():
+		_reconnect_timer.start(_reconnect_delay)
+		_reconnect_delay = minf(_reconnect_delay * 2.0, 30.0)
+	connection_failed.emit(error_msg + " Reconnecting automatically; existing view may be stale.")

@@ -35,7 +35,10 @@ class NeedsState(BaseModel):
         self.hunger = min(100.0, self.hunger + 0.16 + exertion * 0.06)
         self.thirst = min(100.0, self.thirst + 0.24 + exertion * 0.10)
         self.energy = max(0.0, self.energy - 0.10 - exertion * 0.20)
+        # Thermoregulation counteracts mild weather; temperatures must not drift
+        # indefinitely toward lethal values during an ordinary summer.
         temperature_pull = (ambient_temperature_c - 20.0) * 0.004 * max(exposure, 0.0)
+        temperature_pull += (37.0 - self.body_temperature_c) * 0.04
         self.body_temperature_c = min(
             45.0, max(25.0, self.body_temperature_c + temperature_pull)
         )

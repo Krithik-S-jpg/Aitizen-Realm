@@ -5,6 +5,7 @@ import json
 from uuid import UUID
 
 import httpx
+from app.infrastructure.repositories.checkpoint_codec import encode_record, decode_record
 
 
 class SupabaseCheckpoints:
@@ -36,7 +37,9 @@ class SupabaseCheckpoints:
     async def save(self, record: dict) -> dict:
         """Insert a checkpoint without overwriting previous history."""
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(self._url, headers=self._headers, json=record)
+            response = await client.post(self._url, headers=self._headers,
+                                         params={"select": "id,label,tick,schema_version,created_at"},
+                                         json=encode_record(record))
             response.raise_for_status()
             return response.json()[0]
 
@@ -50,14 +53,14 @@ class SupabaseCheckpoints:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(self._url, headers=self._headers, params=params)
             response.raise_for_status()
-            return response.json()
+            return [decode_record(item) for item in response.json()]
 
     async def save_complete(self, record: dict, archive: dict) -> dict:
         """One database transaction: checkpoint plus linked research archive."""
         url = self._url.rsplit("/", 1)[0] + "/rpc/save_complete_world"
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(url, headers=self._headers,
-                                         json={"p_checkpoint": record, "p_archive": archive})
+                                         json={"p_checkpoint": encode_record(record), "p_archive": archive})
             response.raise_for_status()
             return response.json()
 
@@ -66,7 +69,7 @@ class SupabaseCheckpoints:
         url = self._url.rsplit("/", 1)[0] + "/rpc/overwrite_world_save"
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(url, headers=self._headers,
-                                         json={"p_checkpoint": record, "p_archive": archive})
+                                         json={"p_checkpoint": encode_record(record), "p_archive": archive})
             if response.status_code >= 400:
                 try:
                     missing = response.json().get("code") == "P0002"

@@ -6,6 +6,10 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	if DisplayServer.get_name() == "headless":
+		push_error("Renderer benchmark requires a real display")
+		quit(1)
+		return
 	root.size = Vector2i(1152, 648)
 	var renderer := WorldRenderer.new()
 	renderer.position = Vector2(576, 64)
@@ -47,18 +51,24 @@ func _run() -> void:
 		await process_frame
 	var started := Time.get_ticks_usec()
 	var measured_frames := 300
+	var samples: Array[float] = []
+	var previous := Time.get_ticks_usec()
 	for _frame: int in range(measured_frames):
 		if _frame % 12 == 0:
 			for entity: Dictionary in entities:
 				entity["x"] = int(entity["x"]) + (1 if _frame % 24 == 0 else -1)
 			renderer.update_entities(entities)
 		await process_frame
+		var now := Time.get_ticks_usec()
+		samples.append((now - previous) / 1000.0)
+		previous = now
 	var elapsed_seconds := float(Time.get_ticks_usec() - started) / 1_000_000.0
 	var average_fps := measured_frames / maxf(elapsed_seconds, 0.001)
 	print("PERF: dense 64x64 fixture %.1f FPS (%.2f ms/frame)" % [average_fps, 1000.0 / average_fps])
+	samples.sort()
+	print("PERF: median %.2f ms, p95 %.2f ms, worst %.2f ms" % [samples[150], samples[285], samples.back()])
 	print("PERF: process %.2f ms, draw calls %d" % [Performance.get_monitor(Performance.TIME_PROCESS) * 1000, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))])
 	if DisplayServer.get_name() != "headless":
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png("res://.agent-qa/living-world-benchmark.png")
-	assert(average_fps >= 55.0, "Dense renderer did not meet the 60 FPS frame budget")
-	quit()
+	quit(0 if average_fps >= 55.0 else 1)

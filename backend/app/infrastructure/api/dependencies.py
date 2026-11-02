@@ -5,6 +5,8 @@ Maintains and provides singleton instances of core simulation components.
 
 from app.application.services.analytics_service import AnalyticsService
 from app.application.services.animal_service import AnimalService
+from app.application.services.marine_service import MarineService
+from app.application.services.cave_service import CaveService
 from app.application.services.communication_service import CommunicationService
 from app.application.services.construction_service import ConstructionService
 from app.application.services.decision_service import DecisionService
@@ -19,6 +21,7 @@ from app.application.services.resource_service import ResourceService
 from app.application.services.settlement_service import SettlementService
 from app.application.services.society_service import SocietyService
 from app.application.services.world_service import WorldService
+from app.application.services.village_service import advance_village
 from app.core.config import settings
 from app.domain.interfaces.engine import ISimulationEngine
 from app.domain.interfaces.event_bus import IEventBus
@@ -48,6 +51,8 @@ _perception_service = PerceptionService(repository=_world_repository)
 _needs_service = NeedsService(repository=_world_repository)
 _navigation_service = NavigationService(repository=_world_repository)
 _animal_service = AnimalService(repository=_world_repository)
+_marine_service = MarineService(repository=_world_repository)
+_cave_service = CaveService(repository=_world_repository)
 _goal_action_service = GoalActionService(repository=_world_repository)
 _memory_service = MemoryService(repository=_world_repository)
 _society_service = SocietyService(repository=_world_repository)
@@ -163,8 +168,14 @@ async def advance_world_entities(event: Event) -> None:
     """Advances authoritative movement before applying tick needs."""
     _navigation_service.advance_all(event.tick)
     _needs_service.advance_all(event.tick)
+    from app.application.services.family_service import advance as advance_families
+    advance_families(_world_repository.get(), event.tick)
     _animal_service.advance_all(event.tick)
+    _marine_service.advance_all(event.tick)
+    _cave_service.advance_all(event.tick)
     _society_service.advance_all(event.tick)
+    advance_village(_world_repository.get(), event.tick)
+    _communication_service.advance_all(event.tick)
     _settlement_service.advance_all(event.tick)
     _decision_service.advance_all(event.tick)
     _settlement_service.advance_all(event.tick)
@@ -173,6 +184,10 @@ async def advance_world_entities(event: Event) -> None:
 
 async def capture_world_metrics(event: Event) -> None:
     """Records one non-invasive research snapshot after a completed tick."""
+    from app.application.services.scenario_service import advance
+    world = _world_repository.get()
+    if world is not None:
+        advance(world, event.tick)
     _analytics_service.capture(event.tick)
 
 
@@ -181,13 +196,25 @@ async def advance_simulation_tick(event: Event) -> None:
     _world_service.advance_resources(event.tick)
     _navigation_service.advance_all(event.tick)
     _needs_service.advance_all(event.tick)
+    from app.application.services.family_service import advance as advance_families
+    advance_families(_world_repository.get(), event.tick)
     _animal_service.advance_all(event.tick)
+    _marine_service.advance_all(event.tick)
+    _cave_service.advance_all(event.tick)
     _society_service.advance_all(event.tick)
+    advance_village(_world_repository.get(), event.tick)
+    _communication_service.advance_all(event.tick)
     _settlement_service.advance_all(event.tick)
     _decision_service.advance_all(event.tick)
     _settlement_service.advance_all(event.tick)
     _memory_service.decay_all(event.tick)
+    from app.application.services.scenario_service import advance
+    world = _world_repository.get()
+    if world is not None:
+        advance(world, event.tick)
     _analytics_service.capture(event.tick)
+    from app.application.services.recovery_service import save_recovery
+    await save_recovery(event.tick)
 
 
 def restore_checkpoint_state(world: object, tick: int, tick_rate: float) -> None:

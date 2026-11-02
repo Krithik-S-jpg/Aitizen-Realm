@@ -41,7 +41,9 @@ router = APIRouter()
 class EnvironmentControlRequest(BaseModel):
     """Complete operator-facing clock and climate configuration."""
 
-    ticks_per_day: int = Field(default=24, ge=12, le=480)
+    ticks_per_day: int = Field(default=1800, ge=12, le=14400)
+    biological_days_per_day: float = Field(default=1.0, ge=0.0, le=365.0)
+    family_births_enabled: bool = False
     current_hour: int | None = Field(default=None, ge=0, le=23)
     day_start_hour: int = Field(default=8, ge=2, le=12)
     night_start_hour: int = Field(default=20, ge=16, le=23)
@@ -171,6 +173,8 @@ def get_state(
         JSON object containing state and tick.
     """
     tick = engine_service.get_current_tick()
+    from app.application.services.recovery_service import status as recovery_status
+    from app.core.config import settings
     return {
         "state": engine_service.get_simulation_state(),
         "tick_rate": engine_service.get_tick_rate(),
@@ -178,6 +182,8 @@ def get_state(
         "tick_timestamp": tick.timestamp,
         "calendar": calendar_at_tick(tick.value).model_dump(mode="json"),
         "world_health": world_service.get_health_snapshot(),
+        "regional_environment": world_service.get_world().ecology.get("regional_environment", {}) if world_service.get_world() else {},
+        "recovery": {**recovery_status, "enabled": settings.LOCAL_RECOVERY_ENABLED},
     }
 
 

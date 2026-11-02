@@ -303,7 +303,11 @@ class AnalyticsService:
     def export(self) -> dict[str, object]:
         """Produces a compact JSON-compatible research bundle."""
         world = self._require_world()
+        from app.application.services.group_expeditions import reports
+        from app.application.services.world_secrets import journal
         return {
+            "discovery_journal": journal(world),
+            "expeditions": reports(world),
             "world": {
                 "seed": world.seed,
                 "width": world.width,
@@ -331,6 +335,7 @@ class AnalyticsService:
                 for animal in world.entities.values()
                 if animal.kind == EntityKind.ANIMAL and animal.active
             ],
+            "wildlife_journal": [record for citizen in world.entities.values() if citizen.kind == EntityKind.AGENT for record in citizen.metadata.get("wildlife_journal", {}).values()],
             "buildings": [
                 {
                     **site.model_dump(mode="json"),

@@ -111,6 +111,10 @@ class WorldGenerator:
                     world.add_resource(resource)
 
         logger.info("Seeded terrain world generated successfully.")
+        from app.application.services.hydrology import carve_river
+        carve_river(world)
+        from app.application.services.world_secrets import initialize
+        initialize(world)
         return world
 
     @classmethod

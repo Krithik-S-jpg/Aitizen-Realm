@@ -26,6 +26,10 @@ class PerceptionService:
             str(entity_id), EntityKnowledge(observer_id=entity_id)
         )
         radius = observer.perception_radius
+        from app.application.services.world_secrets import observe as observe_secrets
+        observe_secrets(world, observer, tick)
+        from app.application.services.habitat_service import observe as observe_habitats
+        observe_habitats(world, observer, tick)
         known_resource_ids = set(knowledge.resources)
         known_structure_ids = set(knowledge.structures)
         known_entity_ids = set(knowledge.entities)
@@ -67,6 +71,8 @@ class PerceptionService:
             and observer.distance_squared_to(entity.x, entity.y) <= radius**2
         ]
         knowledge.last_observation_tick = tick
+        from app.application.services.adaptive_learning import verify_reports
+        verify_reports(world, observer, visible_resources, tick)
         discoveries = (
             len(set(knowledge.resources) - known_resource_ids)
             + len(set(knowledge.structures) - known_structure_ids)

@@ -18,6 +18,9 @@ from app.infrastructure.repositories.world_repository import InMemoryWorldReposi
 
 
 def _systems() -> tuple[EntityService, DecisionService, GoalActionService]:
+    # Fast deterministic fixture; production defaults to a 30-minute day.
+    from app.domain.models.calendar import CalendarControl, configure_calendar_control
+    configure_calendar_control(0, CalendarControl(ticks_per_day=24))
     repository = InMemoryWorldRepository()
     repository.save(WorldGenerator.generate_flat_world(16, 16))
     perception = PerceptionService(repository)
@@ -153,7 +156,7 @@ def test_sleep_follows_custom_night_start() -> None:
     entities, decisions, _ = _systems()
     citizen = entities.create(EntityKind.AGENT, "Sleeper", 5, 5, tags={"autonomous"})
     try:
-        configure_calendar_control(0, CalendarControl(night_start_hour=22))
+        configure_calendar_control(0, CalendarControl(ticks_per_day=24, night_start_hour=22))
         decisions.advance_all(16)  # 22:00.
         assert citizen.metadata["state"] == "sleep"
     finally:

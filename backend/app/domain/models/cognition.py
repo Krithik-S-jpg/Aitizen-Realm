@@ -24,6 +24,9 @@ class ActionType(StrEnum):
     """Executable actions selected to pursue goals."""
 
     EAT = "EAT"
+    FISH = "FISH"
+    HUNT = "HUNT"
+    COOK = "COOK"
     DRINK = "DRINK"
     REST = "REST"
     MOVE = "MOVE"

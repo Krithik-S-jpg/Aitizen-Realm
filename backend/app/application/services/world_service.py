@@ -52,6 +52,10 @@ class WorldService:
         world = WorldGenerator.generate_terrain_world(width, height, seed)
         self._spawn_animals(world)
         self._spawn_player_agent(world, player_avatar)
+        from app.application.services.marine_service import MarineService
+        MarineService(self._repository).initialize(world)
+        from app.application.services.cave_service import CaveService
+        CaveService(self._repository).initialize(world)
         self._repository.save(world)
         return world
 
@@ -65,6 +69,10 @@ class WorldService:
 
     def restore_world(self, world: World) -> None:
         """Install a validated snapshot without generating replacement entities."""
+        from app.application.services.marine_service import MarineService
+        MarineService(self._repository).initialize(world)
+        from app.application.services.cave_service import CaveService
+        CaveService(self._repository).initialize(world)
         self._repository.save(world)
 
     def reset_world(
@@ -95,6 +103,10 @@ class WorldService:
         if world is None:
             return
         calendar = calendar_at_tick(tick)
+        from app.application.services.hydrology import advance
+        advance(world, tick, calendar)
+        from app.application.services.regional_environment import advance as advance_regions, growth_factor
+        advance_regions(world, tick, calendar)
         weather_multiplier = {
             WeatherType.CLEAR: 0.65,
             WeatherType.RAIN: 1.55,
@@ -121,7 +133,7 @@ class WorldService:
                 if resource.depleted:
                     expired.append(resource_id)
                 continue
-            resource.advance_growth(weather_multiplier * season_multiplier)
+            resource.advance_growth(weather_multiplier * season_multiplier * growth_factor(world.retrieve_tile(resource.x, resource.y)))
             if resource.resource_type.value == "TREE":
                 if (
                     resource.visual_state == "fallen"
@@ -260,7 +272,8 @@ class WorldService:
                 metadata={
                     "species": species,
                     "state": "idle",
-                    "habitat": tile.terrain.value.lower(),
+                    "spawn_biome": tile.terrain.value.lower(),
+                    "habitat": {},
                     "home_x": tile.x,
                     "home_y": tile.y,
                     "sex": "female" if animal_id.int % 2 == 0 else "male",
@@ -384,22 +397,23 @@ class WorldService:
                 default=144,
             )
 
-        spawn = min(
-            candidates,
-            key=lambda tile: (
-                (tile.x - center_x) ** 2
-                + (tile.y - center_y) ** 2
-                + habitat_distance(tile.x, tile.y, water_positions) * 3
-                + habitat_distance(tile.x, tile.y, tree_positions) * 2
-                + (
-                    0
-                    if tile.terrain.value in {"GRASS", "FOREST", "MEADOW", "SAVANNA"}
-                    else 420
-                ),
-                tile.y,
-                tile.x,
-            ),
-        )
+        def lower_bound(tile: Tile) -> tuple[int, int, int]:
+            penalty = 0 if tile.terrain.value in {"GRASS", "FOREST", "MEADOW", "SAVANNA"} else 420
+            return ((tile.x-center_x)**2 + (tile.y-center_y)**2 + penalty, tile.y, tile.x)
+
+        # Habitat distances are nonnegative: skip candidates whose cheapest
+        # possible score already loses. Preserves the original score and ties.
+        ranked = sorted(candidates, key=lower_bound)
+        spawn = ranked[0]
+        best = (float("inf"), 0, 0)
+        for tile in ranked:
+            bound = lower_bound(tile)
+            if bound >= best:
+                break
+            score = (bound[0] + habitat_distance(tile.x, tile.y, water_positions) * 3
+                     + habitat_distance(tile.x, tile.y, tree_positions) * 2, tile.y, tile.x)
+            if score < best:
+                best, spawn = score, tile
         player = Entity(
             kind=EntityKind.AGENT,
             name="Aitizen One",

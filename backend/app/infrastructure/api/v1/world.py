@@ -9,7 +9,7 @@ import secrets
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from app.application.services.world_service import WorldService
@@ -24,6 +24,96 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 DEFAULT_WORLD_WIDTH = 64
 DEFAULT_WORLD_HEIGHT = 64
+
+
+from app.domain.models.scenario import ScenarioDefinition, StrictModel
+from typing import Literal
+
+
+class ScenarioCommand(StrictModel):
+    operation: Literal["save", "start", "stop", "delete", "validate"]
+    scenario_id: str = ""
+    revision: int = Field(default=0, ge=0)
+    definition: ScenarioDefinition | None = None
+
+
+@router.get("/scenarios")
+async def get_scenarios(world_service: WorldService = Depends(get_world_service)):
+    world = world_service.get_world()
+    if world is None:
+        raise HTTPException(409, "Load a world first.")
+    return {"scenarios": world.scenarios, "run": world.scenario_run}
+
+
+@router.post("/scenarios")
+async def scenario_command(command: ScenarioCommand, world_service: WorldService = Depends(get_world_service)):
+    from app.infrastructure.api.dependencies import _engine
+    from app.application.services import scenario_service as scenarios
+    if _engine.get_state().value == "RUNNING" or _engine._stepping:
+        raise HTTPException(409, "Pause the simulation before changing scenarios.")
+    world = world_service.get_world()
+    if world is None:
+        raise HTTPException(409, "Load a world first.")
+    tick = _engine.get_current_tick().value
+    selected = command.scenario_id
+    try:
+        if command.operation in {"save", "validate"}:
+            if command.definition is None:
+                raise ValueError("Scenario definition is required.")
+            scenarios.validate_world(world, command.definition)
+            if command.operation == "save":
+                selected = scenarios.save(world, command.definition, selected, command.revision)
+        elif command.operation == "start":
+            scenarios.start(world, selected, tick)
+        elif command.operation == "stop":
+            if world.scenario_run.get("status") == "running":
+                world.scenario_run["status"] = "stopped"
+                scenarios.log(world.scenario_run, tick, "Stopped by user; world changes retained.")
+        elif command.operation == "delete":
+            entry = world.scenarios.get(selected)
+            if entry is None or entry["revision"] != command.revision:
+                raise ValueError("Scenario changed. Refresh before deleting.")
+            if world.scenario_run.get("status") == "running" and world.scenario_run.get("scenario_id") == selected:
+                raise ValueError("Stop this scenario before deleting it.")
+            del world.scenarios[selected]
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from None
+    return {"scenarios": world.scenarios, "run": world.scenario_run, "selected": selected}
+
+
+class TerrainBrush(BaseModel):
+    x: int
+    y: int
+    radius: int = Field(default=0, ge=0, le=2)
+    terrain: str
+    token: str = ""
+    tool: str = "terrain"
+
+
+@router.post("/editor/{operation}")
+async def edit_terrain(operation: str, brush: TerrainBrush, world_service: WorldService = Depends(get_world_service)):
+    # No await between guard and commit: simulation ticks share this event loop.
+    from app.infrastructure.api.dependencies import _engine
+    from app.application.services import world_editor
+    if _engine.get_state().value == "RUNNING" or _engine._stepping:
+        raise HTTPException(409, "Pause the simulation before editing terrain.")
+    world = world_service.get_world()
+    if world is None:
+        raise HTTPException(409, "Load a world first.")
+    tick = _engine.get_current_tick().value
+    try:
+        if operation == "undo":
+            return world_editor.undo(world, tick)
+        if operation not in {"preview", "apply"}:
+            raise HTTPException(404, "Unknown editor operation")
+        args = (world, brush.x, brush.y, brush.radius, brush.terrain.upper(), tick)
+        if brush.tool != "terrain":
+            from app.application.services import editor_tools
+            args = (world, brush.x, brush.y, brush.radius, brush.tool, brush.terrain.upper(), tick)
+            return editor_tools.preview(*args) if operation == "preview" else editor_tools.apply(*args, brush.token)
+        return world_editor.preview(*args) if operation == "preview" else world_editor.apply(*args, brush.token)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from None
 
 
 class TileResponse(BaseModel):
@@ -178,8 +268,14 @@ def get_live_scene(
 ) -> dict[str, Any]:
     """Refreshes changing scene objects without retransmitting terrain tiles."""
     world = world_service.get_world()
+    from app.infrastructure.api.dependencies import get_engine_service
+    tick = get_engine_service().get_current_tick().value
     return {
         "resources": get_live_resources(world_service),
+        "weather_patches": [p for p in world.weather_patches if p["expires"] > tick] if world is not None else [],
+        "flooded_tiles": [{"x": b["x"], "y": b["y"]} for b in world.hydrology.get("banks", [])
+                          if world.retrieve_tile(b["x"], b["y"]).metadata.get("flooded")]
+        if world is not None else [],
         "structures": [_format_structure(item) for item in world.structures.values()]
         if world is not None
         else [],

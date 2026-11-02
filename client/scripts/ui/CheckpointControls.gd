@@ -171,7 +171,7 @@ func _completed(result: int, code: int, _headers: PackedStringArray, body: Packe
 		return
 	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
 	if code < 200 or code >= 300:
-		_connection.text = "SUPABASE · CHECK FAILED — " + Time.get_time_string_from_system()
+		_connection.text = ("SUPABASE · CHECK FAILED — " if operation == "status" else "SUPABASE · REQUEST FAILED — ") + Time.get_time_string_from_system()
 		_connection.add_theme_color_override("font_color", Color("ef826f"))
 		var messages := {401: "Authentication required: check the backend admin token.", 503: "Supabase is not configured on the backend.", 502: "Supabase unavailable: check credentials, network and checkpoint migration.", 409: "Pause the simulation before saving/loading; check that a world exists."}
 		if code == 401:

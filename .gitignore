@@ -26,3 +26,9 @@ poetry.lock
 .vscode/
 .idea/
 *.log
+# Local Ollama installation progress (machine-specific).
+backend/local-model-setup.status
+backend/local-model-setup.log
+backend/local-model-setup.errors.log
+backend/.local-state/
+.local-build/

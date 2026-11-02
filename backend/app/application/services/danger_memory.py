@@ -7,10 +7,17 @@ from app.domain.models.memory import Episode, EpisodeType
 
 
 def sheltered(world, citizen) -> bool:
-    home = world.structures.get(str(citizen.metadata.get("sleep_home_id", "")))
-    return bool(home and home.completed and str(citizen.id) in home.resident_ids
-                and citizen.metadata.get("indoors") and citizen.metadata.get("state") == "sleep"
-                and citizen.distance_squared_to(home.x, home.y) <= 2)
+    return bool(citizen.metadata.get("in_cave")) or sleeping_home(world, citizen) is not None
+
+
+def sleeping_home(world, citizen):
+    """Resolve an actual occupied residence, including older routine metadata."""
+    if citizen.metadata.get("state") != "sleep":
+        return None
+    homes = sorted(world.structures.values(), key=lambda home: str(home.id))
+    return next((home for home in homes if home.completed and home.bed_capacity > 0
+                 and str(citizen.id) in home.resident_ids
+                 and citizen.distance_squared_to(home.x, home.y) <= 2), None)
 
 
 def remember_attack(world, attacker, victim, tick):
@@ -43,9 +50,14 @@ def remember_attack(world, attacker, victim, tick):
             del episodes[:-200]
         observer.metadata.update(fear=min(100, fear_at(observer, tick) + episode.details["fear_gain"]),
                                  fear_tick=tick, fear_memory_id=str(episode.id),
-                                 wildlife_warning={"x": victim.x, "y": victim.y, "expires": tick + 24})
+                                 wildlife_warning={"x": victim.x, "y": victim.y, "expires": tick + 240,
+                                                   "attacker_id": str(attacker.id), "species": species,
+                                                   "witness_id": str(observer.id), "experience": "attacked" if direct else "witnessed",
+                                                   "event_id": event_id, "observed_tick": tick})
         if observer.needs:
             observer.needs.safety = max(0, observer.needs.safety - 35)
+        from app.application.services.adaptive_learning import remember_danger
+        remember_danger(observer, observer.metadata["wildlife_warning"], observer.id)
 
 
 def fear_at(citizen, tick):

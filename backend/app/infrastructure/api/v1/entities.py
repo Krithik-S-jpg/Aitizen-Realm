@@ -32,6 +32,117 @@ from app.infrastructure.api.dependencies import (
 router = APIRouter()
 
 
+class PlayerChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
+@router.post("/{entity_id}/chat")
+async def player_chat(entity_id: UUID, request: PlayerChatRequest,
+                      service: EntityService = Depends(get_entity_service)) -> dict:
+    from app.application.services.player_chat import reply
+    from app.core.config import settings
+    try:
+        entity = service.get(entity_id)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from None
+    if entity.kind != EntityKind.AGENT or not entity.active:
+        raise HTTPException(409, "Choose a living citizen.")
+    if not request.message.strip():
+        raise HTTPException(422, "Write a message first.")
+    result = await reply(entity, request.message, settings.OLLAMA_MODEL)
+    if service._repository.get() is None or service._repository.get().entities.get(str(entity_id)) is not entity:
+        raise HTTPException(409, "World changed during conversation; select the citizen again.")
+    history = entity.metadata.setdefault("player_chat", [])
+    history.extend([{"role": "user", "content": request.message},
+                    {"role": "assistant", "content": result["reply"]}])
+    del history[:-40]
+    return {"entity_id": str(entity_id), **result}
+
+
+class AIModeRequest(BaseModel):
+    mode: str
+
+
+class GiftRequest(BaseModel):
+    recipient_id: UUID
+    item: str = Field(min_length=1, max_length=60)
+    amount: float = Field(gt=0, allow_inf_nan=False)
+
+
+@router.post("/{entity_id}/give")
+def give_supplies(entity_id: UUID, request: GiftRequest,
+                 service: CommunicationService = Depends(get_communication_service)) -> dict:
+    from app.infrastructure.api.dependencies import get_engine_service
+    try:
+        return service.give(entity_id, request.recipient_id, request.item, request.amount,
+                            get_engine_service().get_current_tick().value)
+    except (ValueError, LookupError) as error:
+        _raise_entity_error(error)
+
+
+@router.post("/{entity_id}/ai-mode")
+def change_ai_mode(entity_id: UUID, request: AIModeRequest,
+                   service: NavigationService = Depends(get_navigation_service)) -> dict:
+    from app.application.services.citizen_planner import set_ai_mode
+    from app.core.config import settings
+    if request.mode == "local_llm" and not settings.OLLAMA_MODEL:
+        raise HTTPException(409, "Configure OLLAMA_MODEL on the backend first.")
+    world = service._repository.get()
+    if world is None:
+        raise HTTPException(409, "Load a world first.")
+    try:
+        return set_ai_mode(world, entity_id, request.mode)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+
+
+@router.post("/{entity_id}/dive")
+def explore_underwater(entity_id: UUID, service: NavigationService = Depends(get_navigation_service)) -> dict:
+    """Request a short authoritative shallow-water exploration trip."""
+    from app.infrastructure.api.dependencies import get_engine_service
+    try:
+        return _movement_payload(service.explore_underwater(entity_id, get_engine_service().get_current_tick().value))
+    except (LookupError, ValueError) as error:
+        _raise_entity_error(error)
+
+
+@router.post("/{entity_id}/dive/return")
+def return_from_dive(entity_id: UUID, service: NavigationService = Depends(get_navigation_service)) -> dict:
+    """Recall a diver along their already visited route."""
+    from app.infrastructure.api.dependencies import get_engine_service
+    try:
+        return _movement_payload(service.return_from_dive(entity_id, get_engine_service().get_current_tick().value))
+    except (LookupError, ValueError) as error:
+        _raise_entity_error(error)
+
+
+class BoatCommandRequest(BaseModel):
+    command: str
+    x: int | None = None
+    y: int | None = None
+
+
+@router.post("/{entity_id}/cave")
+def explore_cave(entity_id: UUID, service: NavigationService = Depends(get_navigation_service)) -> dict:
+    from app.application.services.cave_service import CaveService
+    from app.infrastructure.api.dependencies import get_engine_service
+    try:
+        return CaveService(service._repository).enter(entity_id, get_engine_service().get_current_tick().value)
+    except (LookupError, ValueError) as error:
+        _raise_entity_error(error)
+
+
+@router.post("/{entity_id}/boat")
+def operate_boat(entity_id: UUID, request: BoatCommandRequest, service: NavigationService = Depends(get_navigation_service)) -> dict:
+    from app.infrastructure.api.dependencies import get_engine_service
+    try:
+        result = service.boat_command(entity_id, request.command, get_engine_service().get_current_tick().value, request.x, request.y)
+        service._repository.get().entities[str(entity_id)].metadata.pop("auto_voyage", None)
+        return result
+    except (LookupError, ValueError) as error:
+        _raise_entity_error(error)
+
+
 class CreateEntityRequest(BaseModel):
     """Parameters for a behavior-free generic world entity."""
 
@@ -43,6 +154,8 @@ class CreateEntityRequest(BaseModel):
     tags: set[str] = Field(default_factory=set)
     avatar_id: CitizenAvatar = CitizenAvatar.SCOUT
     auto_spawn: bool = False
+    gender: str = Field(default="unspecified", pattern="^(unspecified|female|male|nonbinary)$")
+    diet: str = Field(default="omnivore", pattern="^(omnivore|vegetarian)$")
 
 
 class ObservationRequest(BaseModel):
@@ -108,6 +221,8 @@ def create_entity(
             request.tags,
             request.avatar_id,
             auto_spawn=request.auto_spawn,
+            gender=request.gender,
+            diet=request.diet,
         )
         return _entity_payload(entity)
     except (LookupError, ValueError) as error:

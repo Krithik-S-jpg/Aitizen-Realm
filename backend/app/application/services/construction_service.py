@@ -23,6 +23,7 @@ class ConstructionService:
         StructureType.FENCE: ({"wood": 5.0}, 8.0),
         StructureType.FARM: ({"wood": 6.0, "fiber": 4.0}, 24.0),
         StructureType.ROAD: ({"stone": 2.0}, 6.0),
+        StructureType.BRIDGE: ({"wood": 16.0, "stone": 4.0}, 28.0),
     }
     PROGRESSION = (
         StructureType.SHELTER,
@@ -64,7 +65,13 @@ class ConstructionService:
         tile = world.retrieve_tile(x, y)
         if tile is None:
             raise LookupError("Construction tile is not loaded.")
-        if not tile.walkable:
+        if structure_type == StructureType.BRIDGE:
+            from app.domain.models.world import TerrainType
+            banks = [world.retrieve_tile(x + dx, y + dy) for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]]
+            dry = [b is not None and b.walkable and b.terrain not in {TerrainType.WATER, TerrainType.OCEAN} for b in banks]
+            if tile.terrain != TerrainType.WATER or not ((dry[0] and dry[1]) or (dry[2] and dry[3])):
+                raise ValueError("A bridge requires a narrow freshwater crossing with opposite dry banks.")
+        elif not tile.walkable:
             raise ValueError("Structures require walkable terrain.")
         if any(
             resource.x == x
@@ -133,6 +140,9 @@ class ConstructionService:
         if not structure.funded:
             raise ValueError("Construction site is waiting for delivered materials.")
         structure.apply_work(amount)
+        if structure.completed and structure.structure_type == StructureType.BRIDGE:
+            tile = self._require_world().retrieve_tile(structure.x, structure.y)
+            tile.walkable = True
         return structure
 
     def blueprints(self) -> dict[str, dict[str, object]]:
@@ -154,7 +164,8 @@ class ConstructionService:
         world = self._require_world()
         store = self._structure(structure_id)
         actor = world.entities.get(actor_id)
-        if store.structure_type != StructureType.STORAGE or not store.completed:
+        household_store = store.bed_capacity > 0 and actor_id in store.resident_ids
+        if (store.structure_type != StructureType.STORAGE and not household_store) or not store.completed:
             raise ValueError("A completed storage building is required.")
         if actor is None or not actor.active:
             raise ValueError("An active citizen is required.")

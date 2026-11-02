@@ -9,12 +9,14 @@ signal new_world_requested(options: Dictionary)
 signal world_restored()
 signal pause_requested()
 
-const STARTER_AVATAR_IDS := ["scout", "builder", "herbalist", "scholar", "cook", "miner", "fisher", "artisan"]
+const STARTER_AVATAR_IDS := ["scout", "builder", "herbalist", "scholar", "cook", "miner", "fisher", "artisan", "juniper", "rowan"]
 
 var _panel: PanelContainer
 var _status: Label
 var _tick_rate: SpinBox
 var _ticks_per_day: SpinBox
+var _biological_rate: SpinBox
+var _family_births: CheckBox
 var _current_hour: SpinBox
 var _day_start: SpinBox
 var _night_start: SpinBox
@@ -78,7 +80,9 @@ func close_panel() -> void:
 func display_environment(data: Dictionary) -> void:
 	var control: Dictionary = data.get("control", {})
 	var calendar: Dictionary = data.get("calendar", {})
-	_ticks_per_day.value = _number_or(control.get("ticks_per_day"), 24.0)
+	_ticks_per_day.value = _number_or(control.get("ticks_per_day"), 1800.0)
+	_biological_rate.value = _number_or(control.get("biological_days_per_day"), 1.0)
+	_family_births.button_pressed = bool(control.get("family_births_enabled", false))
 	_day_start.value = _number_or(control.get("day_start_hour"), 8.0)
 	_night_start.value = _number_or(control.get("night_start_hour"), 20.0)
 	_current_hour.value = _number_or(calendar.get("hour"), 8.0)
@@ -138,6 +142,8 @@ func display_world_created(world: Dictionary) -> void:
 func _apply() -> void:
 	var settings := {
 		"ticks_per_day": int(_ticks_per_day.value),
+		"biological_days_per_day": _biological_rate.value,
+		"family_births_enabled": _family_births.button_pressed,
 		"current_hour": int(_current_hour.value),
 		"day_start_hour": int(_day_start.value),
 		"night_start_hour": int(_night_start.value),
@@ -210,8 +216,13 @@ func _build() -> void:
 	var clock_grid := _section(content, "TIME & RHYTHM", "Set the pace of life. Citizens use these hours for sleep, work and survival.")
 	_tick_rate = _spin(0.25, 8.0, 0.25, 1.0, "×")
 	_add_field(clock_grid, "Simulation speed", _tick_rate)
-	_ticks_per_day = _spin(12, 480, 1, 24, " ticks")
-	_add_field(clock_grid, "Ticks in one day", _ticks_per_day)
+	_ticks_per_day = _spin(12, 14400, 1, 1800, " ticks")
+	_add_field(clock_grid, "Day length (1800 = 30 min at 1 tick/s)", _ticks_per_day)
+	_biological_rate = _spin(0, 365, 1, 1, " days/day")
+	_add_field(clock_grid, "Biological aging (0 freezes aging)", _biological_rate)
+	_family_births = CheckBox.new()
+	_family_births.text = "Enable births (experimental care/visuals)"
+	_add_field(clock_grid, "Family simulation", _family_births)
 	_current_hour = _spin(0, 23, 1, 8, ":00")
 	_add_field(clock_grid, "Set current hour", _current_hour)
 	_day_start = _spin(2, 12, 1, 8, ":00")
@@ -241,7 +252,7 @@ func _build() -> void:
 	seed_row.add_child(_random_seed)
 	seed_row.add_child(_world_seed)
 	_add_field(world_grid, "Terrain seed", seed_row)
-	_starter_avatar = _options(["Aster", "Ember", "Fern", "Lumen", "Rowan", "Saffron", "Tide", "Violet"])
+	_starter_avatar = _options(["Aster", "Ember", "Fern", "Lumen", "Rowan", "Saffron", "Tide", "Violet", "Juniper", "Rowan (new)"])
 	_add_field(world_grid, "Starting appearance", _starter_avatar)
 	var create_world := Button.new()
 	create_world.text = "✦  CREATE FRESH WORLD"

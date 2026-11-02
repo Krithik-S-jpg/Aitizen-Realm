@@ -48,6 +48,10 @@ def test_valid_shelter_hides_and_protects_sleeping_resident():
     resident.metadata.update(state="sleep", indoors=True, sleep_home_id=str(home.id))
     assert sheltered(world, resident)
     assert activity_details(world, resident)["indoors"]
+    resident.metadata.pop("indoors")
+    resident.metadata.pop("sleep_home_id")
+    assert activity_details(world, resident)["indoors"], "Older saves resolve actual residence membership"
+    assert activity_details(world, resident)["sleep_home_position"] == [5, 6]
     assert decisions._threats(world, resident) == []
     bear = entities.create(EntityKind.ANIMAL, "Bear", 4, 5)
     bear.metadata["species"] = "bear"

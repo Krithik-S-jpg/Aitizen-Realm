@@ -220,6 +220,19 @@ class World(BaseModel):
     width: int = Field(default=0, ge=0, description="World width in tiles")
     height: int = Field(default=0, ge=0, description="World height in tiles")
     seed: int | None = Field(default=None, description="Procedural generation seed")
+    marine_initialized: bool = False
+    caves_initialized: bool = False
+    expeditions: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    secrets_initialized: bool = False
+    hydrology: dict[str, Any] = Field(default_factory=dict)
+    ecology: dict[str, Any] = Field(default_factory=dict)
+    editor_history: list[dict[str, Any]] = Field(default_factory=list)
+    editor_revision: int = 0
+    weather_patches: list[dict[str, Any]] = Field(default_factory=list)
+    scenarios: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    scenario_run: dict[str, Any] = Field(default_factory=dict)
+    ancient_sites: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    caves: dict[str, dict[str, Any]] = Field(default_factory=dict)
     resources: dict[str, ResourceNode] = Field(
         default_factory=dict, description="Resource nodes indexed by UUID string"
     )

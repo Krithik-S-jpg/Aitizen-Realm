@@ -42,7 +42,7 @@ def settlement_reports(world: World) -> list[dict[str, object]]:
                     carried[material] = carried.get(material, 0) + amount
         food = sum(
             stock.get(item, 0) + carried.get(item, 0)
-            for item in ("food", "fruit", "meat", "mushroom")
+            for item in ("food", "fruit", "meat", "mushroom", "cooked_fish")
         )
         shortages = []
         if members and food < len(members) * 2:
@@ -107,6 +107,13 @@ def settlement_reports(world: World) -> list[dict[str, object]]:
                 "jobs": jobs,
                 "job_board": board,
                 "households": households,
+                "story": group.village_story,
+                "community_project": group.community_project,
+                "care_jobs": [{"citizen": e.name, **e.metadata["village_job"]} for e in members if e.metadata.get("village_job")],
+                "reserve_target": group.reserve_target,
+                "food_available": food,
+                "maintenance": [{"id": str(site.id), "type": site.structure_type.value.lower(),
+                                 "condition": site.condition} for site in sites if site.completed and site.condition < 90],
                 "beds_total": sum(item["bed_capacity"] for item in households),
                 "beds_available": sum(item["available_beds"] for item in households),
                 "construction": [

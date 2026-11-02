@@ -66,6 +66,8 @@ func _draw() -> void:
 	for structure: Dictionary in _world.get("structures", []):
 		_draw_marker(map_rect, width, height, int(structure["x"]), int(structure["y"]), Color("efc05f"), 2.5)
 	for entity: Dictionary in _world.get("entities", []):
+		for discovery: Dictionary in entity.get("marine_discoveries", {}).values():
+			_draw_marker(map_rect, width, height, int(discovery.x), int(discovery.y), Color("bca4ed") if not str(discovery.get("landmark", "")).is_empty() else Color("549cae"), 1.5)
 		_draw_marker(map_rect, width, height, int(entity["x"]), int(entity["y"]), Color("6cf1e0"), 2.0)
 	var camera_point := Vector2(
 		map_rect.position.x + float(_camera_position.x) / width * map_rect.size.x,

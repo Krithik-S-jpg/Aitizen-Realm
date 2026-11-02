@@ -39,6 +39,8 @@ def test_agent_survives_and_builds_from_world_resources() -> None:
     agent = entities.create(
         EntityKind.AGENT, "Acceptance agent", 5, 5, tags={"autonomous"}
     )
+    # Exercise foraging before farms can supply all food autonomously.
+    agent.needs.hunger = 65
     positions = set()
     for tick in range(480):
         WorldService(repository).advance_resources(tick)

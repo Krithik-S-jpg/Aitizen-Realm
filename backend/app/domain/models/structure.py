@@ -21,6 +21,7 @@ class StructureType(StrEnum):
     FENCE = "FENCE"
     FARM = "FARM"
     ROAD = "ROAD"
+    BRIDGE = "BRIDGE"
 
 
 class Structure(BaseModel):
@@ -43,6 +44,8 @@ class Structure(BaseModel):
     resident_ids: list[str] = Field(default_factory=list)
     planted: bool = False
     watered: bool = False
+    condition: float = Field(default=100.0, ge=0.0, le=100.0)
+    last_upkeep_day: int = Field(default=0, ge=0)
     last_tended_tick: int | None = Field(default=None, ge=0)
 
     @property

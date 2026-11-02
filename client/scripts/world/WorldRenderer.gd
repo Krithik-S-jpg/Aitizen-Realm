@@ -39,6 +39,7 @@ const NO_TILE := Vector2i(2147483647, 2147483647)
 const ANIMATION_FPS := 24.0
 const CitizenVisuals = preload("res://scripts/world/CitizenVisuals.gd")
 const CITIZEN_AVATAR_ORDER := ["scout", "builder", "herbalist", "scholar", "cook", "miner", "fisher", "artisan"]
+const CITIZEN_AQUATIC_ROWS := {"scout": 0, "builder": 4, "herbalist": 2, "scholar": 1, "cook": 7, "miner": 5, "fisher": 6, "artisan": 3}
 const CITIZEN_AVATAR_TINTS: Dictionary = {
 	"scout": Color("1fa9ad"), "builder": Color("d86835"),
 	"herbalist": Color("6f9f45"), "scholar": Color("536bd5"),
@@ -50,10 +51,265 @@ var _tiles: Dictionary = {}
 var _resources: Array = []
 var _effect_resources: Dictionary = {}
 var _structures: Array = []
+var _flood_coordinates: Array[Vector2i] = []
 var _entities: Array = []
 var _active_mining: Dictionary = {}
 var _simulation_running := true
+var underwater_view := false
+var cave_view := false
+var _cave_texture: Texture2D
+var _water_profiles: Dictionary = {}
+var _speech_cues: Dictionary = {}
+var _speech_style: StyleBoxFlat
+
+func _cache_water_profiles() -> void:
+	_water_profiles.clear()
+	for coordinate: Vector2i in _tiles:
+		var terrain := str(_tiles[coordinate].get("terrain", "")).to_lower()
+		if terrain not in ["water", "ocean", "wetland", "swamp"]:
+			continue
+		var exposure := 0.0
+		for offset: Vector2i in [Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2)]:
+			if str(_tiles.get(coordinate + offset, {}).get("terrain", "")).to_lower() in ["water", "ocean"]:
+				exposure += 0.25
+		_water_profiles[coordinate] = {"exposure": exposure, "ocean": terrain == "ocean", "quiet": terrain in ["wetland", "swamp"], "edges": shoreline_edges(coordinate)}
+
+func water_wave_strength(coordinate: Vector2i) -> float:
+	var profile: Dictionary = _water_profiles.get(coordinate, {})
+	if profile.is_empty():
+		return 0.0
+	var wind := clampf(_wind_speed / 20.0, 0, 1)
+	var weather := clampf(_weather_intensity, 0, 1) * .2 if _weather == "RAIN" else 0.0
+	var strength := (.12 + wind * .45 + weather) * lerpf(.35, 1.0, float(profile.exposure))
+	if profile.ocean:
+		strength += .25 * float(profile.exposure)
+	if profile.quiet:
+		strength *= .25
+	return clampf(strength, .025, 1.0)
+
+func _draw_water_waves(coordinate: Vector2i, center: Vector2) -> void:
+	var profile: Dictionary = _water_profiles.get(coordinate, {})
+	if profile.is_empty():
+		return
+	var strength := water_wave_strength(coordinate)
+	var speed := .18 + strength * .35
+	var seed := _seabed_random(coordinate, 83)
+	# Local crests remain inside the tile diamond; no foam leaks onto land.
+	var count := 1 if seed < .6 else 0
+	for crest in range(count):
+		var phase := fposmod(_visual_seconds * speed + seed + crest * .5, 1)
+		var fade := sin(phase * PI)
+		var points := PackedVector2Array()
+		var direction := _wind_vector()
+		for sample in range(9):
+			var t := float(sample) / 8.0
+			var x := (t - .5) * (12 + strength * 20) * (.7 + seed * .6)
+			var y := (phase - .5) * 10 + sin(t * PI) * strength * 2 + (seed - .5) * 5
+			points.append(center + Vector2(x, y) + Vector2(direction.x * (phase - .5) * 8, 0))
+		draw_polyline(points, Color(.35, .72, .87, fade * (.12 + strength * .2)), 3 + strength * 3, true)
+		draw_polyline(points, Color(.77, .94, 1, fade * (.16 + strength * .48)), 1 + strength * 1.3, true)
+	# A thin wash moves towards each land edge and fades before reaching it.
+	var diamond := _diamond_at(center)
+	for edge: int in profile.edges:
+		var phase := fposmod(_visual_seconds * speed + seed, 1)
+		var inset := (1 - phase) * (.06 + strength * .16)
+		var a := diamond[edge].lerp(center, inset + .025)
+		var b := diamond[(edge + 1) % 4].lerp(center, inset + .025)
+		draw_line(a, b, Color(.8, .96, 1, sin(phase * PI) * (.15 + strength * .4)), 1 + strength, true)
+
+func set_cave_view(enabled: bool) -> void:
+	cave_view = enabled
+	if enabled:
+		underwater_view = false
+	if _terrain_mesh != null:
+		_terrain_mesh.visible = not (enabled or underwater_view)
+	if _dynamic_layer != null:
+		_dynamic_layer.set_cave_view(enabled)
+	queue_redraw()
+
+func _draw_caves() -> void:
+	if not _is_dynamic_layer:
+		draw_rect(Rect2(-1000000, -1000000, 2000000, 2000000), Color("17171c"))
+		for coordinate: Vector2i in _ordered_coordinates:
+			var cave: Dictionary = _tiles[coordinate].get("metadata", {}).get("cave", {})
+			if cave.is_empty():
+				continue
+			var floor_lookup := {}
+			for at: Array in cave.get("floor", []):
+				floor_lookup[Vector2i(int(at[0]), int(at[1]))] = true
+			for cell: Array in cave.get("floor", []):
+				var local_cell := Vector2i(int(cell[0]), int(cell[1]))
+				var tile := coordinate + Vector2i(int(cell[0]), int(cell[1]))
+				var point := map_to_local(tile)
+				if not _is_on_screen(point, 150):
+					continue
+				var shade := _seabed_random(tile)
+				draw_colored_polygon(_diamond_at(point), Color("55545a").lerp(Color("45454d"), shade))
+				var rock_region: Array = _terrain_sprite_regions.get("stone", [])
+				if rock_region.size() == 4 and _environment_atlas != null:
+					var uv := PackedVector2Array()
+					for offset: Vector2 in [Vector2(104, 61), Vector2(162, 96), Vector2(104, 132), Vector2(47, 96)]:
+						uv.append((Vector2(rock_region[0], rock_region[1]) + offset) / _environment_atlas.get_size())
+					draw_polygon(_diamond_at(point), PackedColorArray([Color(.58, .56, .64, .5)]), uv, _environment_atlas)
+				# Fine stone seams and grit preserve a readable, open walking surface.
+				for speck in range(7):
+					var offset := Vector2((_seabed_random(tile, speck + 30) - .5) * 38, (_seabed_random(tile, speck + 60) - .5) * 16)
+					draw_line(point + offset, point + offset + Vector2(3, 1), Color(.7, .68, .63, .13), 1)
+				for delta: Vector2i in [Vector2i(-1, 0), Vector2i(0, -1)]:
+					if not floor_lookup.has(local_cell + delta):
+						var a := point + Vector2(-tile_width * .5, 0) if delta.x == -1 else point + Vector2(0, -tile_height * .5)
+						var b := point + Vector2(0, -tile_height * .5) if delta.x == -1 else point + Vector2(tile_width * .5, 0)
+						var rise := Vector2(0, 27 + shade * 9)
+						draw_colored_polygon(PackedVector2Array([a, b, b-rise, a-rise]), Color("34343d") if delta.x == -1 else Color("40404a"))
+						draw_line(a-rise, b-rise, Color("696671"), 3)
+						draw_line(a-rise*.45, b-rise*.45, Color("292a32"), 2)
+						if shade < .28:
+							_water_asset(_cave_texture, 1, 1, 4, 4, point + Vector2(0, -8), Vector2(45, 45), Color("9995a3"))
+				if _seabed_random(tile, 21) < 0.055 and local_cell.length() > 2:
+					var decoration := 2 if shade < .6 else 3
+					for glow in range(4, 0, -1):
+						draw_circle(point, glow * 7, Color(.12, .55, .65, .018))
+					_water_asset(_cave_texture, decoration, 1, 4, 4, point + Vector2(0, -7), Vector2(48, 48))
+			var entry := map_to_local(coordinate)
+			draw_arc(entry, 16, 0, TAU, 24, Color("b7b694"), 2)
+			draw_string(ThemeDB.fallback_font, entry + Vector2(-26, 27), "EXIT ↑", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("d6d2b7"))
+	else:
+		for entity: Dictionary in _ordered_entities:
+			var meta: Dictionary = entity.get("metadata", {})
+			if not meta.get("in_cave", false) and not meta.get("cave_animal", false):
+				continue
+			var cell: Array = meta.get("cave_position", [0, 0])
+			var target := Vector2(float(entity.x) + float(cell[0]), float(entity.y) + float(cell[1]))
+			var point := _map_vector_to_local(_entity_visual_positions.get(str(entity.get("id", "")), target))
+			if not _is_on_screen(point, 100):
+				continue
+			if meta.get("cave_animal", false):
+				_water_asset(_cave_texture, int(_visual_seconds * 8) % 4, 2 if meta.get("species") == "bat" else 3, 4, 4, point + Vector2(0, -12), Vector2(60, 60))
+			else:
+				_draw_agent(point, entity)
+var _marine_texture: Texture2D
+var _swim_texture: Texture2D
+var _marine_life_texture: Texture2D
+var _diving_actions_texture: Texture2D
+
+func set_underwater_view(enabled: bool) -> void:
+	cave_view = false
+	underwater_view = enabled
+	if _terrain_mesh != null:
+		_terrain_mesh.visible = not enabled
+	if _dynamic_layer != null:
+		_dynamic_layer.set_underwater_view(enabled)
+	queue_redraw()
+
+func _water_asset(texture: Texture2D, column: int, row: int, columns: int, rows: int, center: Vector2, size: Vector2, tint := Color.WHITE) -> void:
+	if texture == null:
+		return
+	var cell := Vector2(texture.get_size()) / Vector2(columns, rows)
+	var source := Rect2(Vector2(column, row) * cell, cell)
+	if texture == _marine_texture:
+		var starts := [0.0, 270.0, 576.0, 838.0]
+		var heights := [270.0, 300.0, 252.0, 186.0]
+		source.position.y = starts[row]
+		source.size.y = heights[row]
+	draw_texture_rect_region(texture, Rect2(center - size * 0.5, size), source, tint)
+
+func _seabed_random(coordinate: Vector2i, salt: int = 0) -> float:
+	# Integer mixing avoids the diagonal stripes of linear modulo placement.
+	var value := (coordinate.x * 374761393 + coordinate.y * 668265263 + salt * 144269) & 0x7fffffff
+	value = ((value ^ (value >> 13)) * 1274126177) & 0x7fffffff
+	return float(value ^ (value >> 16)) / 2147483647.0
+
+func _draw_underwater() -> void:
+	if not _is_dynamic_layer:
+		draw_rect(Rect2(-1000000, -1000000, 2000000, 2000000), Color("06172e"))
+	for coordinate: Vector2i in _ordered_coordinates:
+		var point := map_to_local(coordinate)
+		if not _is_on_screen(point, 120):
+			continue
+		var wet := str(_tiles[coordinate].get("terrain", "")).to_lower() in ["water", "ocean"]
+		var habitat: Dictionary = _tiles[coordinate].get("metadata", {}).get("marine", {})
+		if not _is_dynamic_layer:
+			var terrain := str(_tiles[coordinate].get("terrain", "")).to_lower()
+			var depth := 0.55 + sin(coordinate.x * 0.12 + coordinate.y * 0.17) * 0.22
+			if not habitat.is_empty():
+				depth = clampf(float(habitat.get("depth", 5)) / 14.0, 0.1, 0.9)
+			if terrain == "ocean":
+				depth += 0.2
+			var seabed := Color("286887").lerp(Color("0a2c51"), clampf(depth, 0, 1)) if wet else Color("10263e")
+			var diamond := _diamond_at(point)
+			draw_colored_polygon(diamond, seabed)
+			var region: Array = _terrain_sprite_regions.get("sand", [])
+			if region.size() == 4 and _environment_atlas != null:
+				var uv := PackedVector2Array()
+				for offset: Vector2 in [Vector2(104, 61), Vector2(162, 96), Vector2(104, 132), Vector2(47, 96)]:
+					uv.append((Vector2(region[0], region[1]) + offset) / _environment_atlas.get_size())
+				draw_polygon(diamond, PackedColorArray([Color(seabed.lightened(0.2), 0.55) if wet else Color(0.05, 0.13, 0.23, 0.85)]), uv, _environment_atlas)
+		elif wet:
+			var roll := _seabed_random(coordinate)
+			var patch := sin(coordinate.x * 0.41) * cos(coordinate.y * 0.33)
+			var jitter := Vector2((_seabed_random(coordinate, 1) - 0.5) * 20, (_seabed_random(coordinate, 2) - 0.5) * 9)
+			if (str(habitat.get("habitat", "")) == "kelp" or (habitat.is_empty() and patch > 0.12)) and roll < 0.46:
+				var height := lerpf(60, 105, _seabed_random(coordinate, 5))
+				_water_asset(_marine_texture, int(_visual_seconds * 3 + roll * 8) % 4, 1, 4, 4, point + jitter + Vector2(0, -height * 0.25), Vector2(height * 0.7, height), Color("438eac"))
+			elif roll > 0.9:
+				var prop := 1 if roll < 0.97 else 0
+				_water_asset(_marine_texture, prop, 2, 4, 4, point + jitter, Vector2(80, 65), Color("689aba"))
+			if str(habitat.get("landmark", "")) in ["wreck", "cave"]:
+				_water_asset(_marine_life_texture, 1 if habitat.landmark == "wreck" else 2, 3, 4, 4, point + Vector2(0, -18), Vector2(100, 100), Color("80bbc7"))
+			elif str(habitat.get("habitat", "")) == "reef" and roll < 0.3:
+				_water_asset(_marine_texture, 0, 2, 4, 4, point, Vector2(65, 55), Color("a49fc6"))
+			if str(habitat.get("item", "")) == "pearl" and float(habitat.get("remaining", 0)) > 0:
+				_water_asset(_marine_life_texture, 3, 3, 4, 4, point, Vector2(28, 28), Color("a9c9d8"))
+			if roll < 0.025:
+				var ray := PackedVector2Array([point + Vector2(-30, -210), point + Vector2(-10, -210), point + Vector2(70, 10), point + Vector2(10, 10)])
+				draw_colored_polygon(ray, Color(0.5, 0.85, 1, 0.025 + 0.01 * sin(_visual_seconds + roll * 50)))
+			if roll < 0.08:
+				var shimmer := 0.05 + 0.035 * sin(_visual_seconds * 0.8 + roll * 80)
+				draw_arc(point + jitter, 20, 0.3, 2.1, 12, Color(0.3, 0.7, 0.85, shimmer), 1)
+			if roll < 0.18 and _quality_detail_cap > 0:
+				var drift := fposmod(_visual_seconds * 0.12 + roll * 7, 1)
+				draw_circle(point + Vector2(sin(drift * TAU) * 18, -drift * 60), 0.8, Color(0.6, 0.85, 1, sin(drift * PI) * 0.3))
+	for entity: Dictionary in _ordered_entities:
+		if not _is_dynamic_layer or not bool(entity.get("underwater", false)):
+			continue
+		if not str(entity.get("carried_by", "")).is_empty():
+			continue
+		var key := str(entity.get("id", ""))
+		var visual: Vector2 = _entity_visual_positions.get(key, Vector2(float(entity["x"]), float(entity["y"])))
+		var center := _map_vector_to_local(visual)
+		if not str(entity.get("carrying_casualty", "")).is_empty():
+			_draw_rescue_pair(center, entity, true)
+			continue
+		if not _is_on_screen(center, 100):
+			continue
+		var metadata: Dictionary = entity.get("metadata", {})
+		if bool(metadata.get("marine", false)):
+			var species := str(metadata.get("species", "reef_fish"))
+			var marine_row: int = {"reef_fish": 0, "crab": 1, "jellyfish": 2, "shark": 3}.get(species, 0)
+			var frame := 0 if species == "shark" else int(_visual_seconds * 6) % 4
+			if species == "crab" and float(_entity_motion_amounts.get(key, 0)) < 0.01:
+				frame = 0
+			draw_set_transform(center + Vector2(0, -5 if species == "crab" else -25), 0, Vector2(float(_entity_facing.get(key, 1)), 1))
+			_water_asset(_marine_life_texture, frame, marine_row, 4, 4, Vector2.ZERO, Vector2(85, 65) if species == "shark" else Vector2(45, 45), Color("b0e1ec"))
+			draw_set_transform(Vector2.ZERO)
+			continue
+		var row: int = CITIZEN_AQUATIC_ROWS.get(str(entity.get("avatar_id", "scout")), 0)
+		var phase := str(entity.get("dive_phase", "explore"))
+		draw_set_transform(center, 0, Vector2(float(_entity_facing.get(key, 1)), 1))
+		if CitizenVisuals.has_native_action(str(entity.get("avatar_id", "scout")), "swim"):
+			_draw_agent_sprite(Vector2.ZERO, "swim", _visual_seconds, str(entity.get("visual_avatar", entity.avatar_id)))
+		elif _diving_actions_texture != null and phase in ["descend", "gather", "surface"]:
+			var offset: int = {"descend": 0, "gather": 2, "surface": 4}[phase]
+			_water_asset(_diving_actions_texture, offset + int(_visual_seconds * 4) % 2, row, 6, 8, Vector2.ZERO, Vector2(100, 100), Color("b0e1ec"))
+		else:
+			_water_asset(_swim_texture, int(_visual_seconds * 8) % 6, row, 6, 8, Vector2.ZERO, Vector2(100, 100), Color("b0e1ec"))
+		draw_set_transform(Vector2.ZERO)
+		draw_string(ThemeDB.fallback_font, center + Vector2(-20, -35), "O2 %d%%" % int(entity.get("oxygen", 100)), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("9de5e8"))
+		for bubble: int in range(3):
+			var bubble_phase := fposmod(_visual_seconds * 0.5 + bubble * 0.3, 1)
+			draw_arc(center + Vector2(24 + sin(bubble_phase * 4) * 5, -bubble_phase * 45), 2, 0, TAU, 10, Color(0.6, 0.9, 1, 1 - bubble_phase))
 var _visual_seconds := 0.0
+var _bird_heights: Dictionary = {}
 
 func set_simulation_running(running: bool) -> void:
 	_simulation_running = running
@@ -187,6 +443,11 @@ func render_world(
 	entities: Array = []
 ) -> void:
 	_tiles = tiles if _is_dynamic_layer else tiles.duplicate(true)
+	_flood_coordinates.clear()
+	for coordinate: Vector2i in _tiles:
+		if bool(_tiles[coordinate].get("metadata", {}).get("flooded", false)):
+			_flood_coordinates.append(coordinate)
+	_cache_water_profiles()
 	_terrain_mesh_dirty = true
 	_resources = resources if _is_dynamic_layer else resources.duplicate(true)
 	_structures = structures if _is_dynamic_layer else structures.duplicate(true)
@@ -213,6 +474,19 @@ func get_used_rect() -> Rect2i:
 		maximum.x = maxi(maximum.x, coordinate.x)
 		maximum.y = maxi(maximum.y, coordinate.y)
 	return Rect2i(minimum, maximum - minimum + Vector2i.ONE)
+
+
+func update_floods(tiles: Array) -> void:
+	for coordinate: Vector2i in _flood_coordinates:
+		if _tiles.has(coordinate):
+			_tiles[coordinate].get("metadata", {}).erase("flooded")
+	_flood_coordinates.clear()
+	for tile: Dictionary in tiles:
+		var coordinate := Vector2i(int(tile.x), int(tile.y))
+		_flood_coordinates.append(coordinate)
+		if _tiles.has(coordinate):
+			_tiles[coordinate].get("metadata", {})["flooded"] = true
+	queue_redraw()
 
 
 func update_structures(structures: Array) -> void:
@@ -249,10 +523,23 @@ func update_entities(entities: Array) -> void:
 	_has_action_animation = false
 	var present: Dictionary = {}
 	for entity: Dictionary in _entities:
+		if str(entity.get("action", "")).to_lower() in ["fish", "cook", "shared_meal"]:
+			_has_action_animation = true
 		if str(entity.get("action", "idle")).to_lower() in ["move", "wander", "patrol", "regroup", "return_home", "seek_water", "seek_shelter", "seek_weather_shelter", "forage", "flee", "chase", "hunt", "feed", "graze", "drink", "root", "chop", "gather", "pluck", "build", "craft", "sleep", "migrate", "follow_parent", "care_young", "nest"]:
 			_has_action_animation = true
 		var key := str(entity.get("id", "%s,%s" % [entity.get("x", 0), entity.get("y", 0)]))
 		var target := Vector2(float(entity.get("x", 0)), float(entity.get("y", 0)))
+		var speech: Dictionary = entity.get("metadata", {}).get("speech", {})
+		if not speech.is_empty() and _speech_cues.get(key, {}).get("id", "") != speech.get("id", ""):
+			_speech_cues[key] = {"id": speech.id, "started": _visual_seconds, "text": str(speech.get("text", "")).left(240)}
+			var paragraph := TextParagraph.new()
+			paragraph.width = 220
+			paragraph.add_string(str(_speech_cues[key].text), ThemeDB.fallback_font, 13)
+			_speech_cues[key]["paragraph"] = paragraph
+		var cave_meta: Dictionary = entity.get("metadata", {})
+		if cave_meta.get("in_cave", false) or cave_meta.get("cave_animal", false):
+			var cave_at: Array = cave_meta.get("cave_position", [0, 0])
+			target += Vector2(float(cave_at[0]), float(cave_at[1]))
 		present[key] = true
 		var previous_target: Vector2 = _entity_target_positions.get(key, target)
 		if not _entity_visual_positions.has(key) or not _simulation_running:
@@ -304,6 +591,19 @@ func _process(delta: float) -> void:
 	# Project rendering is capped at 60 FPS, so advancing once per rendered frame
 	# avoids cadence aliasing that can accidentally turn a 60 Hz display into 30 Hz.
 	var changed := false
+	var living_birds := {}
+	for animal: Dictionary in _entities:
+		if animal.get("metadata", {}).get("species", "") != "songbird":
+			continue
+		var key := str(animal.get("id", ""))
+		living_birds[key] = true
+		var destination := float(animal.get("metadata", {}).get("altitude", 0))
+		var current := float(_bird_heights.get(key, destination))
+		_bird_heights[key] = destination if preload("res://scripts/ui/AtlasTheme.gd").reduced_motion else move_toward(current, destination, delta * 24)
+		changed = true
+	for key: String in _bird_heights.keys():
+		if not living_birds.has(key):
+			_bird_heights.erase(key)
 	for key: Variant in _entity_visual_positions:
 		var current: Vector2 = _entity_visual_positions[key]
 		var target: Vector2 = _entity_target_positions.get(key, current)
@@ -327,8 +627,9 @@ func _process(delta: float) -> void:
 	var has_falling_tree := _resource_fall_started_ms.values().any(func(started: Variant) -> bool:
 		return _visual_msec() - int(started) < 900
 	)
-	var has_environment_motion := _wind_speed > 0.15 or _weather != "CLEAR"
-	if changed or _has_action_animation or has_falling_tree or has_environment_motion:
+	var has_environment_motion := _wind_speed > 0.15 or _weather != "CLEAR" or (not _water_profiles.is_empty() and not cave_view)
+	var speaking := _speech_cues.values().any(func(cue: Dictionary) -> bool: return _visual_seconds - float(cue.started) < 5.0)
+	if changed or _has_action_animation or has_falling_tree or has_environment_motion or speaking:
 		queue_redraw()
 
 
@@ -435,12 +736,29 @@ func get_visible_chunk_count() -> int:
 
 
 func _draw() -> void:
+	if _cave_texture == null:
+		_cave_texture = load("res://assets/pixel_art/aquatic/mountains_caves_v1.png")
+	if cave_view:
+		_update_local_view_rect()
+		_draw_caves()
+		return
 	if _tiles.is_empty():
 		return
 	_update_local_view_rect()
+	if _marine_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/marine_atlas.png"):
+		_marine_texture = load("res://assets/pixel_art/aquatic/marine_atlas.png")
+	if _marine_life_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/marine_life_v1.png"):
+		_marine_life_texture = load("res://assets/pixel_art/aquatic/marine_life_v1.png")
+	if _diving_actions_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/diving_actions_v1.png"):
+		_diving_actions_texture = load("res://assets/pixel_art/aquatic/diving_actions_v1.png")
+	if _swim_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/swimming_atlas.png"):
+		_swim_texture = load("res://assets/pixel_art/aquatic/swimming_atlas.png")
+	if underwater_view:
+		_draw_underwater()
+		return
 
 	for coordinate: Vector2i in _ordered_coordinates:
-		if _is_dynamic_layer and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
+		if _is_dynamic_layer and not _water_profiles.has(coordinate) and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
 			continue
 		var tile_position := map_to_local(coordinate)
 		if not _is_on_screen(tile_position, 100.0):
@@ -451,6 +769,11 @@ func _draw() -> void:
 			_draw_dynamic_tile_effects(coordinate, _tiles[coordinate], tile_position)
 		else:
 			_draw_tile(coordinate, _tiles[coordinate], tile_position)
+			var ancient: Dictionary = _tiles[coordinate].get("metadata", {}).get("ancient_site", {})
+			if not ancient.is_empty():
+				draw_set_transform(tile_position)
+				preload("res://scripts/world/AntiquityVisuals.gd").paint(self, str(ancient.get("kind", "inscription")))
+				draw_set_transform(Vector2.ZERO)
 
 	if not _is_dynamic_layer:
 		return
@@ -504,12 +827,17 @@ func _draw() -> void:
 			_draw_structure(structure_local, structure)
 
 	for entity: Dictionary in _ordered_entities:
+		if bool(entity.get("metadata", {}).get("marine", false)) or entity.get("metadata", {}).get("in_cave", false) or entity.get("metadata", {}).get("cave_animal", false):
+			continue
 		var entity_position := Vector2i(int(entity["x"]), int(entity["y"]))
 		var entity_local := map_to_local(entity_position)
 		if _is_coordinate_visible(entity_position) and _is_on_screen(entity_local, 150.0):
 			var key := str(entity.get("id", "%s,%s" % [entity["x"], entity["y"]]))
 			var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity_position))
-			if str(entity.get("kind", "agent")).to_lower() == "animal":
+			if bool(entity.get("metadata", {}).get("vessel", false)):
+				var anchored := bool(entity.get("metadata", {}).get("anchored", true))
+				_water_asset(_marine_texture, 0 if anchored else int(_visual_seconds * 6) % 4, 0, 4, 4, _map_vector_to_local(visual), Vector2(110, 80))
+			elif str(entity.get("kind", "agent")).to_lower() == "animal":
 				_draw_animal(_map_vector_to_local(visual), entity)
 			else:
 				_draw_agent(_map_vector_to_local(visual), entity)
@@ -541,10 +869,15 @@ func _draw_tile(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) ->
 	if terrain in ["water", "ocean"]:
 		_draw_shoreline(coordinate, diamond)
 	_draw_layer_overlay(coordinate, diamond, tile_data)
+	if bool(tile_data.get("metadata", {}).get("flooded", false)):
+		draw_colored_polygon(diamond, Color(0.15, 0.47, 0.65, 0.65))
+		draw_line(center - Vector2(10, 0), center + Vector2(10, 0), Color("86c6d9"), 1.5)
 	if _draw_detail_level > 1 and terrain not in ["grass", "forest", "water", "ocean", "wetland", "swamp", "ice", "savanna"] and (not used_atlas_tile or terrain in ["meadow", "volcanic"]):
 		_draw_tile_details(coordinate, center, terrain, variant)
 	if _draw_detail_level > 0 and terrain == "mountain" and posmod(coordinate.x * 19 + coordinate.y * 23, 10) < 7:
 		_draw_mountain(coordinate, center, float(tile_data.get("metadata", {}).get("elevation", 0.8)))
+	if not tile_data.get("metadata", {}).get("cave", {}).is_empty():
+		_water_asset(_cave_texture, 0, 1, 4, 4, center + Vector2(0, -25), Vector2(135, 135))
 
 
 func shoreline_edges(coordinate: Vector2i) -> Array[int]:
@@ -567,18 +900,10 @@ func _draw_shoreline(coordinate: Vector2i, diamond: PackedVector2Array) -> void:
 
 
 func _draw_dynamic_tile_effects(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) -> void:
+	if _water_profiles.has(coordinate):
+		_draw_water_waves(coordinate, center)
 	var terrain := str(tile_data.get("terrain", "grass")).to_lower()
 	var variant: int = int(tile_data.get("metadata", {}).get("variant", 0))
-	if _draw_detail_level > 0 and terrain in ["water", "ocean", "wetland", "swamp", "ice"]:
-		var wave_phase := float(_visual_msec()) * (0.0013 + _wind_speed * 0.00008) + float(coordinate.x * 3 + coordinate.y * 5)
-		var wave_offset := sin(wave_phase) * (3.0 + minf(_wind_speed, 14.0) * 0.32)
-		var wave_push := _wind_vector() * minf(_wind_speed, 12.0) * 0.3
-		draw_line(
-			center + Vector2(-13 + wave_offset, -2) + wave_push,
-			center + Vector2(-2 + wave_offset, -2) + wave_push,
-			Color(0.78, 0.94, 1.0, 0.38),
-			1.2
-		)
 	if _draw_detail_level > 1 and terrain in ["grass", "forest", "wetland", "swamp", "savanna"]:
 		_draw_tile_details(coordinate, center, terrain, variant)
 
@@ -722,6 +1047,11 @@ func _draw_tile_details(coordinate: Vector2i, center: Vector2, terrain: String, 
 
 
 func _draw_mountain(coordinate: Vector2i, tile_center: Vector2, elevation: float) -> void:
+	if _cave_texture != null:
+		if posmod(coordinate.x, 2) == 0 and posmod(coordinate.y, 2) == 0:
+			var column := 2 if elevation > 0.9 else int(_seabed_random(Vector2i(coordinate.x / 6, coordinate.y / 6), 16) * 2.0)
+			_water_asset(_cave_texture, column, 0, 4, 4, tile_center + Vector2(0, -42), Vector2(220, 220))
+		return
 	var variation: int = posmod(coordinate.x * 17 + coordinate.y * 31, 11)
 	var is_major_peak: bool = variation < 5 or elevation > 0.86
 	var shadow_center := tile_center + Vector2(5, 7)
@@ -969,6 +1299,16 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 	var funded: bool = bool(structure.get("funded", true))
 	var base := tile_center + Vector2(0, 2)
 	var kind := str(structure.get("structure_type", "shelter")).to_lower()
+	if kind == "bridge":
+		var length := 7 if completed else maxi(1, int(progress * 7))
+		for plank: int in range(length):
+			var point := tile_center + Vector2((plank - 3) * 7, (plank - 3) * 3.5 - 5)
+			draw_line(point + Vector2(-12, 6), point + Vector2(12, -6), Color("ad8052"), 6.0)
+		if completed:
+			for side: int in [-1, 1]:
+				var offset := Vector2(side * 12, side * -6 - 12)
+				draw_line(tile_center + offset - Vector2(24, 12), tile_center + offset + Vector2(24, 12), Color("65492f"), 3.0)
+		return
 	if kind == "road":
 		var road_color := Color("a89a79") if completed else Color("6f6655")
 		draw_colored_polygon(_diamond_at(tile_center), Color(road_color, 0.8))
@@ -1002,9 +1342,9 @@ func _draw_construction_site(base: Vector2, structure: Dictionary, kind: String,
 	var delivered: Dictionary = structure.get("materials_delivered", {})
 	var required_total := 0.0
 	var delivered_total := 0.0
-	for material: String in required:
-		required_total += float(required[material])
-		delivered_total += minf(float(required[material]), float(delivered.get(material, 0.0)))
+	for material_key: String in required:
+		required_total += float(required[material_key])
+		delivered_total += minf(float(required[material_key]), float(delivered.get(material_key, 0.0)))
 	var supply_ratio := delivered_total / maxf(required_total, 1.0)
 	var stage := clampf(progress, 0.0, 1.0)
 	# A stone footing stays visible throughout construction and anchors the site.
@@ -1106,9 +1446,36 @@ func _draw_fire_physics(origin: Vector2, fuel: float) -> void:
 
 
 func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
+	var metadata_value: Variant = entity.get("metadata", {})
+	var metadata: Dictionary = metadata_value if metadata_value is Dictionary else {}
+	# Spawned/legacy animals carry a biome name; established homes carry an object.
+	var home_value: Variant = metadata.get("habitat", {})
+	var home: Dictionary = home_value if home_value is Dictionary else {}
+	if not home.is_empty() and home.get("status", "") != "abandoned":
+		var at := map_to_local(Vector2i(int(home.get("x", 0)), int(home.get("y", 0))))
+		if home.get("kind") == "nest":
+			at += Vector2(0, -25)
+			preload("res://scripts/world/NestVisuals.gd").paint(self, at, int(home.get("eggs", 0)), float(home.get("progress", 4)) / 4)
+		elif home.get("kind") in ["den", "burrow"]:
+			draw_set_transform(at, 0, Vector2(1, .6))
+			draw_circle(Vector2.ZERO, 10 if home.get("kind") == "den" else 6, Color("564c38"))
+			draw_circle(Vector2(0, -1), 5, Color("202723"))
+			draw_set_transform(Vector2.ZERO)
+	if metadata.get("species", "") == "songbird":
+		var target_height := float(metadata.get("altitude", 0))
+		var height := float(_bird_heights.get(str(entity.get("id", "")), target_height))
+		draw_circle(tile_center, 3, Color(0, 0, 0, .18))
+		var center := tile_center - Vector2(0, height)
+		var flight := clampf(absf(height - target_height) / 6, 0, 1) if target_height < 35 else 1.0
+		var flap := sin(_visual_seconds * 12) * 3 * flight
+		var span := 2.0 + flight * 5 + flap
+		draw_colored_polygon(PackedVector2Array([center + Vector2(6, 0), center + Vector2(-5, -span), center + Vector2(-2, 0), center + Vector2(-5, span)]), Color("304c63"))
+		if flight < .4:
+			draw_line(center + Vector2(-1, 1), center + Vector2(-1, 4), Color("bb9762"), 1)
+		draw_circle(center + Vector2(3, 0), 2, Color("e7b56f"))
+		return
 	if _animal_sprite_regions.is_empty():
 		return
-	var metadata: Dictionary = entity.get("metadata", {})
 	var species := str(metadata.get("species", "rabbit")).to_lower()
 	if not _animal_sprite_regions.has(species):
 		return
@@ -1196,10 +1563,72 @@ func _draw_carcass(tile_center: Vector2, quantity: float, state: String) -> void
 
 
 func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
+	if not str(entity.get("infant_carried_by", "")).is_empty():
+		return
+	if not str(entity.get("carrying_infant", "")).is_empty():
+		var carrier_avatar := str(entity.get("visual_avatar", entity.get("avatar_id", "scout")))
+		var walking := float(_entity_motion_amounts.get(str(entity.get("id", "")), 0.0)) > 0.04
+		var facing := float(_entity_facing.get(str(entity.get("id", "")), 1.0))
+		draw_set_transform(tile_center, 0, Vector2(facing, 1))
+		if CitizenVisuals.has_native_action(carrier_avatar, "carry_infant"):
+			_draw_agent_sprite(Vector2.ZERO, "carry_infant" if walking else "cradle", _visual_seconds, carrier_avatar)
+		else:
+			_draw_agent_sprite(Vector2.ZERO, "move" if walking else "idle", _visual_seconds, carrier_avatar)
+			_draw_agent_sprite(Vector2(9, -24), "idle", _visual_seconds, "family_infant")
+		draw_set_transform(Vector2.ZERO)
+		return
+	if not str(entity.get("carried_by", "")).is_empty():
+		return
+	if not str(entity.get("carrying_casualty", "")).is_empty():
+		_draw_rescue_pair(tile_center, entity, false)
+		return
+	var cue: Dictionary = _speech_cues.get(str(entity.get("id", "")), {})
+	if not cue.is_empty() and _visual_seconds - float(cue.started) < 5.0:
+		var speech_text: TextParagraph = cue.get("paragraph")
+		if speech_text == null:
+			return
+		var speech_size := speech_text.get_size()
+		var bubble := tile_center + Vector2(-110, -70 - speech_size.y)
+		draw_style_box(_speech_bubble_style(), Rect2(bubble - Vector2(8, 6), speech_size + Vector2(16, 12)))
+		speech_text.draw(get_canvas_item(), bubble, Color("23483c"))
+	if bool(entity.get("underwater", false)):
+		draw_arc(tile_center, 16, 0, TAU, 24, Color(0.7, 0.9, 1, 0.5), 1.5)
+		return
 	if bool(entity.get("indoors", false)) and str(entity.get("action", "")) == "sleep":
-		return # Residents remain inspectable, but the roof hides the sleeping sprite.
+		var home_position: Variant = entity.get("sleep_home_position")
+		if home_position is Array and home_position.size() == 2:
+			var roof := map_to_local(Vector2i(int(home_position[0]), int(home_position[1])))
+			var drift := fposmod(_visual_seconds * 0.4, 1.0)
+			draw_string(ThemeDB.fallback_font, roof + Vector2(8, -80 - drift * 12), "zzz", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.94, 1.0, 1.0 - drift * 0.5))
+		return
 	var action := str(entity.get("action", "idle")).to_lower()
+	if action == "shared_meal":
+		var bowl := tile_center + Vector2(14, -19)
+		draw_arc(bowl, 7, 0, PI, 12, Color("c99561"), 4)
+		var spoon := bowl + Vector2(-4, -5 - (sin(_visual_seconds * 4) + 1) * 5)
+		draw_line(bowl + Vector2(3, 0), spoon, Color("e8d1a0"), 2, true)
 	var action_target: Dictionary = entity.get("action_target", {})
+	if action == "hunt" and not CitizenVisuals.has_native_action(str(entity.get("avatar_id", "scout")), "hunt"):
+		var thrust := maxf(0.0, sin(_visual_seconds * 8.0)) * 13.0
+		var grip := tile_center + Vector2(8 + thrust, -24)
+		draw_line(grip - Vector2(15, -5), grip + Vector2(24, -8), Color("a77947"), 3, true)
+		draw_colored_polygon(PackedVector2Array([grip + Vector2(24, -12), grip + Vector2(33, -11), grip + Vector2(24, -5)]), Color("b9c6ca"))
+	if action == "fish" and action_target.has("water_x") and int(entity.get("x", 0)) == int(action_target.get("x", -1)) and int(entity.get("y", 0)) == int(action_target.get("y", -1)):
+		var bobber := map_to_local(Vector2i(int(action_target.water_x), int(action_target.water_y))) + Vector2(0, sin(_visual_seconds * 3) * 2)
+		var hand := tile_center + Vector2(8, -24)
+		var tip := hand + (bobber - hand).normalized() * 32 + Vector2(0, -25 + sin(_visual_seconds * 2))
+		draw_line(hand, tip, Color("bd9158"), 3, true)
+		draw_polyline(PackedVector2Array([tip, (tip + bobber) * .5 + Vector2(0, 10), bobber]), Color("cbd6c7"), 1, true)
+		draw_circle(bobber, 2.5, Color("e58158"))
+		var ring := fposmod(_visual_seconds * .7, 1)
+		draw_arc(bobber, 3 + ring * 8, 0, TAU, 16, Color(.8, .94, 1, (1-ring)*.5), 1)
+	elif action == "cook" and int(entity.get("x", 0)) == int(action_target.get("x", -1)) and int(entity.get("y", 0)) == int(action_target.get("y", -1)):
+		var pan := tile_center + Vector2(18, -16)
+		draw_line(tile_center + Vector2(3, -20), pan, Color("b79560"), 3)
+		draw_arc(pan, 9, 0, PI, 12, Color("45434c"), 4)
+		for puff in range(3):
+			var age := fposmod(_visual_seconds * .6 + puff * .33, 1)
+			draw_circle(pan + Vector2(sin(age*5)*3, -age*25), 2+age*3, Color(.85, .88, .86, (1-age)*.4))
 	if action in ["gather", "chop", "pluck"] and action_target.has("x") and action_target.has("y"):
 		var at_interaction_tile := (
 			absi(int(entity.get("x", 0)) - int(action_target["x"])) <= 1
@@ -1214,6 +1643,8 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 		action = "move"
 	if action == "move" and float(_entity_motion_amounts.get(entity_key, 0.0)) <= 0.04:
 		action = "idle"
+	if action in ["idle", "play", "caregiving"] and bool(entity.get("teaching_animation", false)) and str(entity.get("visual_avatar", entity.get("avatar_id", ""))) == "scout":
+		action = "teach"
 	var phase := _visual_seconds + float(abs(str(entity.get("id", "")).hash()) % 19)
 	if action == "move":
 		phase = float(_entity_stride_distances.get(entity_key, 0.0)) / 40.0 * 0.8
@@ -1238,8 +1669,22 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 	var inventory: Dictionary = entity.get("inventory", {}) if entity.get("inventory") is Dictionary else {}
 	var items: Dictionary = inventory.get("items", {})
 	var carrying_wood := action == "move" and float(items.get("wood", 0)) > 0
-	_draw_agent_sprite(Vector2.ZERO, "carry" if carrying_wood else action, phase, str(entity.get("avatar_id", "scout")))
-	if action == "move" and not carrying_wood:
+	var travel_mode := str(entity.get("travel_mode", "walk"))
+	if travel_mode == "swim" and CitizenVisuals.has_native_action(str(entity.get("avatar_id", "scout")), "swim"):
+		_draw_agent_sprite(Vector2.ZERO, "swim", phase, str(entity.get("visual_avatar", entity.avatar_id)))
+	elif travel_mode == "swim":
+		var swim_row: int = CITIZEN_AQUATIC_ROWS.get(str(entity.get("avatar_id", "scout")), 0)
+		_water_asset(_swim_texture, int(_visual_seconds * 8) % 6, swim_row, 6, 8, Vector2(0, -13), Vector2(100, 100))
+	else:
+		_draw_agent_sprite(Vector2.ZERO, "move" if travel_mode == "boat" else "carry" if carrying_wood else action, phase, str(entity.get("visual_avatar", entity.get("avatar_id", "scout"))))
+	if travel_mode == "swim":
+		draw_set_transform(base, 0.0, Vector2(facing, 1))
+		draw_arc(Vector2(0, -5), 24 + sin(phase * 5) * 3, 0, PI, 20, Color("a8dfe6"), 2)
+	elif travel_mode == "boat":
+		if not bool(entity.get("metadata", {}).get("aboard", false)):
+			_water_asset(_marine_texture, int(_visual_seconds * 6) % 4, 0, 4, 4, Vector2(0, -7), Vector2(130, 95))
+		draw_arc(Vector2(0, 8), 38, 0.1, PI - 0.1, 20, Color(0.7, 0.9, 1, 0.6), 1.5)
+	if action == "move" and not carrying_wood and travel_mode == "walk":
 		_draw_carried_material(entity)
 	draw_set_transform(Vector2.ZERO)
 	if action == "sleep":
@@ -1248,6 +1693,11 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 	if action == "socialize":
 		for dot: int in range(3):
 			draw_circle(base + Vector2(-7 + dot * 7, -74 + sin(_visual_seconds * 3 + dot) * 2), 2.0, Color("e8dfbd"))
+	if bool(entity.get("care_animation", false)) or bool(entity.get("teaching_animation", false)):
+		var teaching := bool(entity.get("teaching_animation", false))
+		var pulse := sin(_visual_seconds * 3.0) * 2.0
+		draw_circle(base + Vector2(15, -54 + pulse), 9, Color("173b46"))
+		draw_string(ThemeDB.fallback_font, base + Vector2(10, -50 + pulse), "?" if teaching else "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("94e5c0"))
 	if is_player:
 		draw_arc(base + Vector2(0, -12), 18.0, 0.0, TAU, 28, Color(accent, 0.72), 1.6)
 		draw_string(ThemeDB.fallback_font, base + Vector2(-42, -76), str(entity.get("name", "AITIZEN")), HORIZONTAL_ALIGNMENT_CENTER, 84, 10, Color("e8f6f1"))
@@ -1264,6 +1714,33 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 		var progress: float = clampf(float(entity.get("action_progress", 0.0)), 0.0, 1.0)
 		draw_rect(Rect2(base + Vector2(-17, -64), Vector2(34, 4)), Color("102027"))
 		draw_rect(Rect2(base + Vector2(-16, -63), Vector2(32 * progress, 2)), action_color)
+
+
+func _draw_rescue_pair(center: Vector2, entity: Dictionary, towing: bool) -> void:
+	# A dedicated four-pose carry/tow cycle composites the actual two appearances.
+	var key := str(entity.get("id", ""))
+	var moving := float(_entity_motion_amounts.get(key, 0.0)) > 0.02
+	var cycle := _visual_seconds * 5.0 if moving or towing else 0.0
+	var pose := int(cycle) % 4
+	var lift: float = [0.0, -2.0, 0.0, 1.5][pose]
+	var facing := float(_entity_facing.get(key, 1.0))
+	draw_set_transform(center + Vector2(0, lift), 0, Vector2(facing, 1))
+	var avatar := str(entity.get("visual_avatar", entity.get("avatar_id", "scout")))
+	if towing and not CitizenVisuals.has_native_action(avatar, "swim") and _swim_texture != null:
+		_water_asset(_swim_texture, int(_visual_seconds * 8) % 6, int(CITIZEN_AQUATIC_ROWS.get(avatar, 0)), 6, 8, Vector2(-15, -31), Vector2(100, 100))
+	else:
+		_draw_agent_sprite(Vector2.ZERO, "swim" if towing else "move" if moving else "idle", cycle * 0.16, avatar)
+	var passenger_offset := Vector2(-29, -12) if towing else Vector2(9, -18)
+	draw_set_transform(center + Vector2(passenger_offset.x * facing, passenger_offset.y + lift), sin(cycle * PI * .5) * .04, Vector2(facing * .72, .72))
+	_draw_agent_sprite(Vector2.ZERO, "sleep", 0, str(entity.get("carried_avatar", "scout")))
+	draw_set_transform(center + Vector2(0, lift), 0, Vector2(facing, 1))
+	# Supporting forearms remain in front of the passenger, unlike ordinary walking.
+	draw_polyline(PackedVector2Array([Vector2(-10, -27), Vector2(-15, -40), Vector2(-4, -44)]) if not towing else PackedVector2Array([Vector2(-9, -19), Vector2(-20, -15), Vector2(-28, -16)]), Color("bc956f"), 4, true)
+	if towing:
+		draw_arc(Vector2(12, 0), 20 + pose, 0, PI, 16, Color(.7, .9, 1, .5), 1.5)
+	draw_set_transform(Vector2.ZERO)
+	draw_rect(Rect2(center + Vector2(-29, -101), Vector2(58, 18)), Color("102827"))
+	draw_string(ThemeDB.fallback_font, center + Vector2(-24, -88), "RESCUE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("ffcf8a"))
 
 
 func _draw_carried_material(entity: Dictionary) -> void:
@@ -1336,6 +1813,13 @@ static func animation_frame(seconds: float, frame_count: int, cycle_seconds: flo
 	var sampled_time := floorf(seconds * ANIMATION_FPS) / ANIMATION_FPS
 	return int(floorf(fposmod(sampled_time, maxf(cycle_seconds, 0.1)) / maxf(cycle_seconds, 0.1) * frame_count)) % frame_count
 
+
+func _speech_bubble_style() -> StyleBoxFlat:
+	if _speech_style == null:
+		_speech_style = StyleBoxFlat.new()
+		_speech_style.bg_color = Color("e4ead6")
+		_speech_style.set_corner_radius_all(7)
+	return _speech_style
 
 func _draw_agent_sprite(base: Vector2, action: String, phase: float, avatar_id := "scout") -> void:
 	var identity_frames := CitizenVisuals.action_frames(avatar_id, action)
@@ -1601,6 +2085,7 @@ func _rebuild_terrain_mesh() -> void:
 		_terrain_mesh.material = surface_material
 		add_child(_terrain_mesh)
 	_terrain_mesh.texture = _environment_atlas
+	_terrain_mesh.visible = not (underwater_view or cave_view)
 	if _ordered_coordinates.is_empty():
 		_terrain_mesh.mesh = null
 		return

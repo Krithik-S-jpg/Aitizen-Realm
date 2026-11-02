@@ -26,6 +26,33 @@ from app.infrastructure.repositories.supabase_checkpoints import SupabaseCheckpo
 router = APIRouter()
 
 
+def save_failure_detail(error: httpx.HTTPError) -> str:
+    """Expose safe categories, never upstream messages, payloads or credentials."""
+    suffix = " Refresh saves before retrying; completion was not confirmed."
+    if isinstance(error, httpx.TimeoutException):
+        return "Supabase save timed out. The save may have completed." + suffix
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        try:
+            code = error.response.json().get("code", "")
+        except (ValueError, AttributeError):
+            code = ""
+        if status in {401, 403} or code == "42501":
+            return "Supabase rejected save permissions. Check the backend server key and function grants." + suffix
+        if code in {"PGRST202", "42883"}:
+            return "A required Supabase save function is missing. Apply the complete-save and overwrite migrations." + suffix
+        if code in {"42P01", "42703", "PGRST204"}:
+            return "Supabase save schema is incomplete. Apply all repository migrations in order." + suffix
+        if status == 413:
+            return "The world save exceeds the server request-size limit." + suffix
+        if code == "57014":
+            return "Supabase stopped the save at its database statement timeout." + suffix
+        if isinstance(code, str) and len(code) == 5 and code.isalnum():
+            return f"Supabase rejected the save (database code {code}, HTTP {status})." + suffix
+        return f"Supabase save request failed (HTTP {status})." + suffix
+    return "Could not reach Supabase while saving. Check the network and retry after refreshing saves."
+
+
 class RestorablePayload(BaseModel):
     """Validate the complete restore payload before mutating runtime state."""
 
@@ -106,8 +133,10 @@ async def save_checkpoint(
         return {key: value for key, value in result.items() if key != "payload"}
     except LookupError:
         raise HTTPException(404, "Selected save no longer exists. Refresh saves.") from None
-    except httpx.HTTPError:
-        raise HTTPException(502, "Save failed or could not be confirmed. For complete saves, apply the complete-save migration. Refresh saves before retrying.") from None
+    except ValueError:
+        raise HTTPException(422, "World save exceeds the supported size or contains invalid data.") from None
+    except httpx.HTTPError as error:
+        raise HTTPException(502, save_failure_detail(error)) from None
 
 
 @router.get("")
@@ -144,6 +173,8 @@ async def read_checkpoint(
     """Download a backup; does not mutate the active world."""
     try:
         records = await store.read(checkpoint_id)
+    except ValueError:
+        raise HTTPException(422, "Saved world payload is invalid or uses an unsupported encoding.") from None
     except httpx.HTTPError:
         raise HTTPException(502, "Checkpoint storage request failed") from None
     if not records:
@@ -158,6 +189,8 @@ async def restore_checkpoint(
     """Restore a saved world and clock into a paused simulation."""
     try:
         records = await store.read(checkpoint_id)
+    except ValueError:
+        raise HTTPException(422, "Saved world payload is invalid or uses an unsupported encoding.") from None
     except httpx.HTTPError:
         raise HTTPException(502, "Checkpoint storage request failed") from None
     if not records:

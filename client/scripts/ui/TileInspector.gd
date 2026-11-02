@@ -112,6 +112,8 @@ func display_entity_info(entity: Dictionary, chunk_size: int) -> void:
 	for key: String in ["health", "energy", "hunger", "thirst"]:
 		lines.append("%s: %s" % [key.capitalize(), "%.0f / 100" % float(needs[key]) if needs.has(key) else "Unavailable"])
 	label_terrain.text = "\n".join(lines)
+	if bool(entity.get("underwater", false)):
+		label_terrain.text += "\nOxygen: %.0f%% · Depth: %sm\nDive: %s\nReturn: %s\nDiscoveries: %d" % [float(entity.get("oxygen", 100)), str(entity.get("depth", 0)), str(entity.get("dive_phase", "explore")), str(entity.get("dive_origin", [])), entity.get("marine_discoveries", {}).size()]
 	label_terrain.custom_minimum_size.y = 76
 	var target: Dictionary = entity.get("action_target", {})
 	label_id.text = "Target: (%s, %s)" % [target["x"], target["y"]] if target.has("x") and target.has("y") else "Target: not reported"

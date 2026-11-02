@@ -29,6 +29,8 @@ class EntityService:
         tags: set[str] | None = None,
         avatar_id: CitizenAvatar = CitizenAvatar.SCOUT,
         auto_spawn: bool = False,
+        gender: str = "unspecified",
+        diet: str = "omnivore",
     ) -> Entity:
         """Creates an entity on a loaded, walkable world tile."""
         world = self._require_world()
@@ -63,6 +65,8 @@ class EntityService:
             perception_radius=perception_radius,
             tags=tags or set(),
             avatar_id=avatar_id,
+            gender=gender,
+            diet=diet,
             needs=NeedsState()
             if kind in {EntityKind.AGENT, EntityKind.ANIMAL}
             else None,
@@ -150,6 +154,13 @@ class EntityService:
                     else {},
                     **activity_details(world, entity),
                     "memory_graph": memory_graph(world, entity),
+                    "relationships": [
+                        {"id": str(bond.target_id), "name": world.entities[str(bond.target_id)].name,
+                         "trust": bond.trust, "familiarity": bond.familiarity,
+                         "label": "Friend" if bond.trust >= .35 and bond.familiarity >= .25 else "Acquaintance"}
+                        for bond in world.social_bonds.values()
+                        if bond.source_id == entity.id and str(bond.target_id) in world.entities
+                    ],
                 }
             )
         return result

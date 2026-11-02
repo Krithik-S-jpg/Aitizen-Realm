@@ -30,9 +30,10 @@ const EVENT_ICONS := {
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	position = Vector2(-354, 158)
-	size = Vector2(336, 430)
+	z_index = 100
+	set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	position = Vector2(18, -300)
+	size = Vector2(336, 160)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stack = VBoxContainer.new()
 	_stack.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -46,6 +47,13 @@ func display_events(events: Array) -> void:
 			_add_event(event_value as Dictionary)
 
 
+func reset_events() -> void:
+	_seen.clear()
+	for child in _stack.get_children():
+		_stack.remove_child(child)
+		child.queue_free()
+
+
 func _add_event(event: Dictionary) -> void:
 	var event_id := str(event.get("id", "%s:%s" % [event.get("tick", 0), event.get("title", "event")]))
 	if _seen.has(event_id):
@@ -54,6 +62,9 @@ func _add_event(event: Dictionary) -> void:
 	if _seen.size() > 2000:
 		_seen.erase(_seen.keys()[0])
 	var severity := str(event.get("severity", "info")).to_lower()
+	# Keep routine sleep/wake and ordinary activity in history, not toast spam.
+	if severity not in ["warning", "danger", "success"] and str(event.get("event_type", "")) not in ["birth", "death", "construction", "society", "achievement", "discovery", "crafted", "harvest", "hunt"]:
+		return
 	var accent: Color = EVENT_COLORS.get(severity, EVENT_COLORS["info"])
 	var card := Button.new()
 	card.custom_minimum_size = Vector2(336, 72)
@@ -76,21 +87,27 @@ func _add_event(event: Dictionary) -> void:
 	if event.get("x") != null and event.get("y") != null:
 		var coordinate := Vector2i(int(event["x"]), int(event["y"]))
 		card.pressed.connect(func() -> void: navigate_requested.emit(coordinate))
-	_stack.add_child(card)
-	_stack.move_child(card, 0)
-	while _stack.get_child_count() > 5:
-		var oldest := _stack.get_child(_stack.get_child_count() - 1)
+	# Animate inside a fixed slot so the container cannot override the slide.
+	var slot := Control.new()
+	slot.custom_minimum_size = Vector2(336, 76)
+	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stack.add_child(slot)
+	slot.add_child(card)
+	card.size = Vector2(336, 76)
+	while _stack.get_child_count() > 2:
+		var oldest := _stack.get_child(0)
 		_stack.remove_child(oldest)
 		oldest.queue_free()
 	card.modulate.a = 0.0
-	card.position.x = 48.0
+	card.position.x = -360.0
 	var tween := card.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	tween.tween_property(card, "modulate:a", 1.0, 0.2)
 	tween.tween_property(card, "position:x", 0.0, 0.3)
 	var expiry := card.create_tween()
-	expiry.tween_interval(8.0 if severity in ["warning", "danger"] else 6.0)
-	expiry.tween_property(card, "modulate:a", 0.0, 0.35)
-	expiry.tween_callback(card.queue_free)
+	expiry.tween_interval(4.65)
+	expiry.tween_property(card, "position:x", -360.0, 0.35)
+	expiry.parallel().tween_property(card, "modulate:a", 0.0, 0.35)
+	expiry.tween_callback(slot.queue_free)
 
 
 func _style(background: Color, accent: Color) -> StyleBoxFlat:

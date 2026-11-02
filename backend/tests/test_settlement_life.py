@@ -3,6 +3,9 @@
 from app.application.services.settlement_observation import settlement_reports
 from app.application.services.settlement_service import SettlementService
 from app.application.services.society_service import SocietyService
+from app.application.services.communication_service import CommunicationService
+from app.application.services.memory_service import MemoryService
+from app.application.services.village_service import advance_village
 from app.application.services.world_service import WorldService
 from app.domain.models.calendar import DayPhase, calendar_at_tick
 from app.domain.models.cognition import ActionType, GoalType, TaskStatus
@@ -109,12 +112,15 @@ def test_five_citizens_establish_camp_without_orders():
     positions = {str(citizen.id): set() for citizen in citizens}
     society = SocietyService(decisions._repository)
     settlement = SettlementService(decisions._repository)
-    for tick in range(480):
+    communication = CommunicationService(decisions._repository, MemoryService(decisions._repository), society)
+    for tick in range(2880):
         WorldService(decisions._repository).advance_resources(tick)
         decisions._navigation.advance_all(tick)
         decisions._needs.advance_all(tick)
         society.advance_all(tick)
+        advance_village(world, tick)
         settlement.advance_all(tick)
+        communication.advance_all(tick)
         decisions.advance_all(tick)
         settlement.advance_all(tick)
         for citizen in citizens:
@@ -122,6 +128,15 @@ def test_five_citizens_establish_camp_without_orders():
             if citizen.metadata.get("state") == "sleep":
                 slept.add(citizen.id)
         assert all(inv.carried <= inv.capacity for inv in world.inventories.values())
+        if any(not c.active for c in citizens):
+            for c in citizens:
+                print("SURVIVAL", tick, c.name, c.active, c.x, c.y, c.needs.model_dump(),
+                      {k: c.metadata.get(k) for k in ("state", "dive_trip", "aboard", "auto_voyage", "blocked_reason", "last_decision_reason")})
+        assert all(c.active for c in citizens), {
+            "tick": tick, "citizens": [{"name": c.name, "active": c.active,
+                "needs": c.needs.model_dump(), "position": [c.x, c.y],
+                "reason": c.metadata.get("last_decision_reason"), "blocked": c.metadata.get("blocked_reason"),
+                "pack": world.inventories[str(c.id)].items} for c in citizens]}
     assert all(citizen.active for citizen in citizens)
     assert len(slept) == 5
     assert all(len(value) > 3 for value in positions.values())

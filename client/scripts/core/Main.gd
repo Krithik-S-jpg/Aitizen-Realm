@@ -32,8 +32,55 @@ var _follow_player := true
 var _tracked_entity_id := ""
 var _tick_rate := 1.0
 var _last_world_event_sequence := -1
+var _depth_controls: HBoxContainer
+var _depth_world_page := true
+var _depth_focus_mode := false
+var _world_editor: PanelContainer
 
 func _ready() -> void:
+	add_child(preload("res://scripts/network/ObserverCapture.gd").new())
+	_world_editor = preload("res://scripts/ui/WorldEditor.gd").new()
+	_world_editor.renderer = world_scene.renderer
+	hud.add_child(_world_editor)
+	_world_editor.terrain_changed.connect(_on_reload_requested)
+	hud.navigation_requested.connect(func(mode: String) -> void:
+		_world_editor.visible = mode == "editor")
+	var depth_controls := HBoxContainer.new()
+	_depth_controls = depth_controls
+	depth_controls.name = "DepthControls"
+	$UI.add_child(depth_controls)
+	depth_controls.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	depth_controls.position = Vector2(244, 88)
+	depth_controls.add_theme_constant_override("separation", 6)
+	var depth_group := ButtonGroup.new()
+	for caption: String in ["↑ Surface", "↓ Underwater", "◇ Caves"]:
+		var button := Button.new()
+		button.text = caption
+		button.custom_minimum_size = Vector2(102, 32)
+		button.toggle_mode = true
+		button.button_group = depth_group
+		var below := caption.contains("Underwater")
+		button.button_pressed = caption.contains("Surface")
+		button.tooltip_text = "Observation layer only; does not move citizens"
+		button.pressed.connect(func() -> void:
+			world_scene.renderer.set_underwater_view(below)
+			world_scene.renderer.set_cave_view(caption.contains("Caves"))
+			if caption.contains("Caves"):
+				for coordinate: Vector2i in world_scene.renderer._tiles:
+					if not world_scene.renderer._tiles[coordinate].get("metadata", {}).get("cave", {}).is_empty():
+						_focus_camera_at(coordinate)
+						break)
+		depth_controls.add_child(button)
+	for page: Control in [admin_panel, analysis_panel, settings_panel]:
+		page.visibility_changed.connect(_update_depth_controls)
+	hud.navigation_requested.connect(func(mode: String) -> void:
+		if mode != "search":
+			_depth_world_page = mode == "world"
+			_update_depth_controls())
+	hud.focus_mode_requested.connect(func(enabled: bool) -> void:
+		_depth_focus_mode = enabled
+		_update_depth_controls())
+	_update_depth_controls()
 	# Wire up connection and parsing signals
 	api_client.world_data_received.connect(_on_world_data_received)
 	api_client.connection_failed.connect(_on_connection_failed)
@@ -43,6 +90,8 @@ func _ready() -> void:
 	api_client.chunk_data_received.connect(loader.merge_chunk_data)
 	api_client.resources_data_received.connect(_on_live_resources_received)
 	api_client.structures_data_received.connect(_on_live_structures_received)
+	api_client.floods_received.connect(func(tiles: Array) -> void: world_scene.renderer.update_floods(tiles))
+	api_client.weather_patches_received.connect(func(patches: Array) -> void: world_scene.weather_overlay.set_patches(patches))
 	loader.validation_failed.connect(_on_validation_failed)
 
 	hud.reload_requested.connect(_on_reload_requested)
@@ -62,6 +111,8 @@ func _ready() -> void:
 	settings_panel.new_world_requested.connect(_on_new_world_requested)
 	settings_panel.pause_requested.connect(func() -> void: simulation_client.send_command("pause"))
 	settings_panel.world_restored.connect(func() -> void:
+		_last_world_event_sequence = -1
+		event_overlay.reset_events()
 		_on_reload_requested()
 		simulation_client.fetch_state()
 		simulation_client.fetch_environment()
@@ -77,6 +128,24 @@ func _ready() -> void:
 	admin_panel.remove_agent_requested.connect(entity_client.remove_agent)
 	admin_panel.refresh_requested.connect(entity_client.fetch_overview)
 	admin_panel.focus_requested.connect(_focus_camera_at)
+	admin_panel.dive_requested.connect(entity_client.start_dive)
+	admin_panel.ai_mode_requested.connect(entity_client.set_ai_mode)
+	admin_panel.gift_requested.connect(entity_client.give_supplies)
+	admin_panel.cave_requested.connect(entity_client.explore_cave)
+	admin_panel.dive_return_requested.connect(entity_client.return_from_dive)
+	admin_panel.boat_requested.connect(entity_client.operate_boat)
+	admin_panel.follow_entity_requested.connect(func(entity_id: String) -> void:
+		_tracked_entity_id = entity_id
+		_follow_player = true
+		_update_player_entity()
+		hud.navigation_requested.emit("world")
+		world_scene.renderer.set_underwater_view(bool(_player_entity.get("underwater", false)))
+		world_scene.renderer.set_cave_view(bool(_player_entity.get("metadata", {}).get("in_cave", false)))
+		var depth_buttons := _depth_controls.get_children()
+		(depth_buttons[1] as Button).button_pressed = world_scene.renderer.underwater_view
+		(depth_buttons[2] as Button).button_pressed = world_scene.renderer.cave_view
+		(depth_buttons[0] as Button).button_pressed = not (world_scene.renderer.underwater_view or world_scene.renderer.cave_view))
+	entity_client.dive_started.connect(entity_client.fetch_overview)
 	entity_client.overview_received.connect(admin_panel.display_agents)
 	entity_client.overview_received.connect(_on_live_entities_received)
 	entity_client.entity_created.connect(_on_agent_created)
@@ -93,7 +162,17 @@ func _ready() -> void:
 	# Initial request on start
 	_on_reload_requested()
 
+func _update_depth_controls() -> void:
+	if not is_instance_valid(_depth_controls):
+		return
+	_depth_controls.visible = _depth_world_page and not _depth_focus_mode and not (
+		admin_panel.visible or analysis_panel.visible or settings_panel.visible)
+
 func _unhandled_input(event: InputEvent) -> void:
+	if is_instance_valid(_world_editor) and _world_editor.visible and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		_world_editor.select_tile(world_scene.renderer.local_to_map(world_scene.renderer.to_local(get_global_mouse_position())))
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_F:
 			_follow_player = not _follow_player
@@ -198,11 +277,13 @@ func _on_validation_failed(error_message: String) -> void:
 	hud.update_status(false, "Schema Validation Error: " + error_message)
 
 func _on_reload_requested() -> void:
-	hud.update_status(true) # clears disconnect labels
+	hud.update_status(false, "Reconnecting — retrieving authoritative world...")
 	api_client.fetch_world()
 
 
 func _on_new_world_requested(options: Dictionary = {}) -> void:
+	_last_world_event_sequence = -1
+	event_overlay.reset_events()
 	hud.update_status(true)
 	inspector.hide_inspector()
 	world_scene.renderer.clear_selection()
@@ -402,6 +483,10 @@ func _on_live_entities_received(entities: Array) -> void:
 		return
 	_parsed_world["entities"] = entities.duplicate(true)
 	world_scene.renderer.update_entities(entities)
+	for animal: Dictionary in entities:
+		if animal.get("metadata", {}).get("species", "") == "songbird":
+			world_scene._birds.set_meta("simulated_birds", true)
+			world_scene._birds.target_activity = 0.0
 	inspector.refresh_entities(entities, int(_parsed_world.get("chunk_size", 16)))
 	minimap.update_entities(entities)
 	_update_player_entity()

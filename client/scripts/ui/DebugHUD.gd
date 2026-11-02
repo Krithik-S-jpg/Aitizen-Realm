@@ -419,6 +419,7 @@ func _build_command_hud() -> void:
 	_overview_scroll.add_child(_status_rail)
 	var heading := _hud_label("◉  WORLD OVERVIEW", 13, Color("72d6bb"))
 	_status_rail.add_child(heading)
+	_status_rail.add_child(_command_button("✎  World editor", func() -> void: navigation_requested.emit("editor"), Vector2(214, 32)))
 	_layer_menu = MenuButton.new()
 	_layer_menu.text = "LAYERS  ·  TERRAIN  ▾"
 	_layer_menu.custom_minimum_size = Vector2(214, 30)

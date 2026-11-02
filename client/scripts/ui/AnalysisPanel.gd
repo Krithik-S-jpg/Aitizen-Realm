@@ -19,6 +19,8 @@ var _table: Tree
 var _search: LineEdit
 var _sidebar: VBoxContainer
 var _population_chart: Control
+var _discovery_map: Control
+var _migration_map: Control
 var _refresh_elapsed := 0.0
 var _selected_record_id := ""
 
@@ -44,6 +46,12 @@ func open_mode(mode: String) -> void:
 	_title.text = {"animals": "Wildlife observatory", "buildings": "Buildings & construction", "research": "Research & experiments", "history": "World history", "settlements": "Settlements & groups", "economy": "Resources & economy"}.get(mode, "Observatory")
 	_subtitle.text = {"research": "Measurements and configured experiments", "history": "Recorded events from the living world", "settlements": "Emergent groups and their home territories", "economy": "Stored materials and construction activity"}.get(mode, "")
 	_build_sidebar()
+	if mode == "expeditions":
+		_title.text = "Expeditions & shared knowledge"
+		_subtitle.text = "Live parties, provisions, discoveries and return reports"
+	if mode == "discoveries":
+		_title.text = "The Discovery Journal"
+		_subtitle.text = "Observed places · physical evidence · shared knowledge"
 	_content.text = "[color=#72d6bb]Synchronizing authoritative simulation data…[/color]"
 	show()
 	_panel.modulate.a = 0.0
@@ -77,9 +85,9 @@ func _build_sidebar() -> void:
 	for child: Node in _sidebar.get_children():
 		_sidebar.remove_child(child)
 		child.queue_free()
-	for mode: String in ["animals", "buildings", "research", "history", "settlements", "economy"]:
+	for mode: String in ["animals", "buildings", "research", "history", "settlements", "economy", "expeditions", "discoveries"]:
 		var button := Button.new()
-		button.text = {"animals": "Wildlife & habitats", "buildings": "Construction sites", "research": "Research overview", "history": "Event timeline", "settlements": "Groups & homes", "economy": "Material stock"}[mode]
+		button.text = {"animals": "Wildlife & habitats", "buildings": "Construction sites", "research": "Research overview", "history": "Event timeline", "settlements": "Groups & homes", "economy": "Material stock", "expeditions": "Expeditions", "discoveries": "Discovery journal"}[mode]
 		button.custom_minimum_size = Vector2(170, 38)
 		button.toggle_mode = true
 		button.button_pressed = mode == _mode
@@ -94,6 +102,17 @@ func _render_data() -> void:
 	var records: Array = []
 	var headings: Array = []
 	match _mode:
+		"discoveries":
+			headings = ["Discovered place", "Evidence", "First observer"]
+			for entry: Dictionary in _data.get("discovery_journal", []):
+				var observers: Array = entry.get("discoverers", [])
+				records.append([entry.get("name", "Unknown ruin"), "Inspected" if entry.get("inspected", false) else "Unexamined", observers[0].get("name", "Unknown") if not observers.is_empty() else "Unknown", entry])
+			_content.text = "Select a discovery to read its evidence and provenance. Double-click to focus its location. Undiscovered sites remain hidden."
+		"expeditions":
+			headings = ["Party", "Stage / destination", "Reason"]
+			for trip: Dictionary in _data.get("expeditions", []):
+				records.append([", ".join(trip.get("member_names", [])), "%s · %s" % [trip.get("phase", ""), str(trip.get("destination", []))], trip.get("reason", ""), trip])
+			_content.text = "Short supply-checked surveys. Select a party to inspect discoveries, carried supplies and return status."
 		"animals":
 			headings = ["Animal", "Activity / age", "Health / position"]
 			for animal: Dictionary in _data.get("wildlife", []):
@@ -101,6 +120,8 @@ func _render_data() -> void:
 				var needs: Dictionary = animal.get("needs", {}) if animal.get("needs") is Dictionary else {}
 				records.append([str(animal.get("name", "Animal")), "%s · %s days" % [metadata.get("state", "idle"), metadata.get("age_days", "unknown")], "%s HP · (%s, %s)" % [needs.get("health", "—"), animal.get("x", 0), animal.get("y", 0)], animal])
 			_content.text = "Select an animal for its observed lifestyle, territory and family. Double-click a row to focus its location."
+			for entry: Dictionary in _data.get("wildlife_journal", []):
+				records.append(["FIELD NOTE · " + str(entry.get("species", "Wildlife")), str(entry.get("kind", "sighting")).replace("_", " "), "Seen by %s · T%s" % [entry.get("observer", ""), entry.get("last_seen_tick", 0)], entry])
 		"buildings":
 			headings = ["Building", "Completion", "Position / supplies"]
 			for site: Dictionary in _data.get("buildings", []):
@@ -120,8 +141,8 @@ func _render_data() -> void:
 			headings = ["Material", "Stored quantity", "Source"]
 			var economy: Dictionary = _data.get("economy", {})
 			var stock: Dictionary = economy.get("stock", {})
-			for material: String in stock:
-				records.append([material.capitalize(), "%.1f" % float(stock[material]), "Carried + communal storage"])
+			for material_key: String in stock:
+				records.append([material_key.capitalize(), "%.1f" % float(stock[material_key]), "Carried + communal storage"])
 			_content.text = "Stored supplies across %s inventories. %s / %s structures complete.\nMarket prices and trade routes are not yet simulated." % [economy.get("inventories", 0), economy.get("completed_structures", 0), economy.get("structures", 0)]
 		_:
 			headings = ["Experiment", "Status", "Seed"]
@@ -145,6 +166,11 @@ func _render_data() -> void:
 		shown += 1
 	_summary.text = "%d records   ·   %s" % [shown, "No matching records" if shown == 0 else "Live simulation data"]
 	_population_chart.visible = _mode in ["research", "settlements"]
+	_discovery_map.visible = _mode == "discoveries"
+	_migration_map.hide()
+	_table.custom_minimum_size.y = 110 if _mode == "discoveries" else 0
+	_content.custom_minimum_size.y = 100 if _mode == "discoveries" else 130
+	_discovery_map.set_entries(_data.get("discovery_journal", []), _selected_record_id)
 	_population_chart.set_samples(_data.get("metrics", []))
 	_inspect_record()
 
@@ -154,7 +180,39 @@ func _inspect_record() -> void:
 	if item == null or not item.get_metadata(0) is Dictionary:
 		return
 	var record: Dictionary = item.get_metadata(0)
+	_migration_map.visible = _mode == "animals" and record.get("kind", "") == "migration_sightings"
+	if _migration_map.visible:
+		_migration_map.set_points(record.get("points", []))
 	_selected_record_id = str(record.get("id", ""))
+	if _mode == "discoveries":
+		_discovery_map.set_entries(_data.get("discovery_journal", []), _selected_record_id)
+		var lines: Array[String] = [str(record.get("name", "")), str(record.get("mystery", "")), "EVIDENCE: " + str(record.get("evidence", "Approach this site to inspect the inscription.")), "ARTIFACT: " + str(record.get("artifact", "Not yet examined"))]
+		for observer: Dictionary in record.get("discoverers", []):
+			lines.append("Observed by %s · tick %s" % [observer.get("name", ""), observer.get("tick", 0)])
+		for account: Dictionary in record.get("accounts", []):
+			lines.append("%s · %s · %.0f%% confidence" % [account.get("citizen", ""), account.get("source", ""), float(account.get("confidence", 0)) * 100])
+		lines.append("Expedition accounts: " + str(record.get("expeditions", [])))
+		for comment: Dictionary in record.get("interpretations", []):
+			lines.append("INTERPRETATION (not a fact) · %s: %s" % [comment.get("speaker", ""), comment.get("text", "")])
+		_content.text = "\n".join(lines).replace("[", "[lb]")
+		return
+	if _mode == "expeditions":
+		var lines: Array[String] = ["PARTY: " + ", ".join(record.get("member_names", [])), "STAGE: " + str(record.get("phase", "")), "DESTINATION: " + str(record.get("destination", [])), "RETURN REASON: " + str(record.get("reason", "")), "CARRIED SUPPLIES"]
+		for member: String in record.get("supplies", {}):
+			lines.append(str(record.supplies[member]))
+		lines.append("ITINERARY: " + str(record.get("kind", "survey")))
+		if record.has("camp"):
+			lines.append("OVERNIGHT CAMP: %s · Rest completed: %s" % [str(record.camp), str(record.get("overnight_complete", false))])
+		lines.append("PLANNER: " + str(record.get("planner", "utility")))
+		lines.append("EQUIPMENT STILL NEEDED: " + str(record.get("equipment", {})))
+		if record.has("rescue"):
+			lines.append("CASUALTY RETRIEVAL: " + str(record.rescue))
+		lines.append("DISCOVERIES")
+		for member: String in record.get("discoveries", {}):
+			lines.append("%d newly observed resource locations" % record.discoveries[member].size())
+		lines.append("Reports delivered: %d" % record.get("reports", []).size())
+		_content.text = "\n".join(lines)
+		return
 	if _mode == "settlements":
 		var lines: Array[String] = [str(record.get("name", "Settlement")), "SHORTAGES"]
 		for shortage: String in record.get("shortages", []):
@@ -169,10 +227,24 @@ func _inspect_record() -> void:
 		for task: Dictionary in record.get("job_board", []):
 			lines.append("%s · %s%s — %s" % [str(task.get("status", "open")).to_upper(), task.get("job_type", "task"), " · " + str(task.get("material")) if task.get("material") else "", task.get("reason", "")])
 		lines.append("CONSTRUCTION")
+		lines.append("FOOD RESERVE: %.1f / %.1f target" % [float(record.get("food_available", 0)), float(record.get("reserve_target", 0))])
+		for repair: Dictionary in record.get("maintenance", []):
+			lines.append("Maintenance: %s · %.0f%% condition" % [repair.get("type", "Building"), float(repair.get("condition", 100))])
+		lines.append("VILLAGE STORY")
+		var project: Dictionary = record.get("community_project", {})
+		if not project.is_empty():
+			lines.append("PROJECT: %s · %s · %d supporters" % [project.get("title", ""), project.get("status", ""), project.get("votes", []).size()])
+		for care: Dictionary in record.get("care_jobs", []):
+			lines.append("%s · %s" % [care.get("citizen", "Citizen"), care.get("kind", "Care job")])
+		for event: Dictionary in record.get("story", []):
+			lines.append("T%d · %s" % [int(event.get("tick", 0)), event.get("text", "")])
 		for site: Dictionary in record.get("construction", []):
 			lines.append("%s · %d%% · %s" % [site.get("type", "Site"), roundi(float(site.get("progress", 0)) * 100), "funded" if site.get("funded", false) else "needs " + str(site.get("missing_materials", {}))])
 		_content.text = "\n".join(lines)
 	if _mode == "animals":
+		if record.has("observer"):
+			_content.text = "%s · %s\nObserved by %s at (%s, %s)\nFirst sighting T%s · Last sighting T%s\nStatus: %s · Eggs: %s\nObserved route points: %s\nThis is a past observation, not live knowledge of unseen wildlife." % [record.get("species", ""), record.get("kind", ""), record.get("observer", ""), record.get("x", 0), record.get("y", 0), record.get("first_seen_tick", 0), record.get("last_seen_tick", 0), record.get("status", "sighting"), record.get("eggs", 0), str(record.get("points", []))]
+			return
 		var metadata: Dictionary = record.get("metadata", {})
 		_content.text = "%s\n%s\nHome: (%s, %s) · Stage: %s\nMother: %s · Offspring: %s" % [record.get("name", "Animal"), metadata.get("lifestyle", "No lifestyle observation yet"), metadata.get("home_x", "—"), metadata.get("home_y", "—"), metadata.get("age_stage", "unknown"), metadata.get("mother_id", "Unknown"), metadata.get("offspring_count", 0)]
 	elif _mode == "buildings":
@@ -257,6 +329,12 @@ func _build() -> void:
 	refresh.text = "↻  REFRESH"
 	refresh.pressed.connect(func() -> void: refresh_requested.emit())
 	header.add_child(refresh)
+	var report := preload("res://scripts/ui/SimulationReport.gd").new()
+	add_child(report)
+	var report_button := Button.new()
+	report_button.text = "Report / download"
+	header.add_child(report_button)
+	report_button.pressed.connect(func() -> void: report.generate(_data))
 	var close := Button.new()
 	close.text = "×  CLOSE"
 	close.pressed.connect(close_panel)
@@ -292,6 +370,11 @@ func _build() -> void:
 	)
 	_population_chart = preload("res://scripts/ui/PopulationChart.gd").new()
 	workspace.add_child(_population_chart)
+	_discovery_map = preload("res://scripts/ui/DiscoveryMap.gd").new()
+	workspace.add_child(_discovery_map)
+	_migration_map = preload("res://scripts/ui/MigrationMap.gd").new()
+	_migration_map.hide()
+	workspace.add_child(_migration_map)
 	_content = RichTextLabel.new()
 	_content.bbcode_enabled = true
 	_content.custom_minimum_size.y = 130

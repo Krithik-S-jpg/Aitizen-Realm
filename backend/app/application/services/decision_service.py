@@ -61,6 +61,14 @@ class DecisionService:
             for key, site in world.structures.items()
         )
         for option in options:
+            group = world.groups.get(str(entity.group_id))
+            project = group.community_project if group else {}
+            if option.goal_type == GoalType.BUILD and project.get("status") == "agreed" and str(entity.id) in project.get("votes", []):
+                option.score = max(option.score, .9)
+                option.reason = "Help complete the construction project agreed with neighbours."
+            if option.goal_type == GoalType.GATHER and entity.metadata.get("village_food_shortage"):
+                option.score = max(option.score, .78)
+                option.reason = "Build up the village food reserve before the next season."
             if option.goal_type == GoalType.EXPLORE and self._social_target(
                 world, entity
             ):
@@ -147,14 +155,18 @@ class DecisionService:
                 option.reason = "Unload the pack into shared storage."
         return sorted(options, key=lambda item: (-item.score, item.goal_type.value))
 
-    def decide(self, entity_id: UUID, tick: int) -> tuple[Goal, Action]:
+    def decide(self, entity_id: UUID, tick: int, *, _already_observed: bool = False) -> tuple[Goal, Action]:
         """Selects and begins the highest-scoring currently feasible motive."""
         world = self._require_world()
         entity = self._agent(world, entity_id)
+        from app.application.services.family_service import adult
+        if not adult(entity):
+            raise ValueError("Minors follow supervised family routines, not independent work.")
         active = self._lifecycle.active(entity.id)
         if active is not None:
             return active
-        self._perception.observe(entity.id, tick)
+        if not _already_observed:
+            self._perception.observe(entity.id, tick)
         entity.metadata["decision_tick"] = tick
         neighbours = [
             other
@@ -173,9 +185,30 @@ class DecisionService:
         )
         selected: tuple[UtilityOption, ActionType, dict[str, object]] | None = None
         trace: list[dict[str, object]] = []
-        for option in self.evaluate(entity.id):
+        options = self.evaluate(entity.id)
+        from app.application.services.adaptive_learning import update_ambition, safe_to_pursue, retry_blocked
+        ambition = update_ambition(world, entity, tick)
+        if safe_to_pursue(entity) and ambition["status"] == "active":
+            for candidate in options:
+                if candidate.goal_type.value.lower() == ambition["kind"] and candidate.score > 0:
+                    candidate.score += .08
+                    candidate.reason += " Personal ambition: " + ambition["title"] + "."
+            options.sort(key=lambda candidate: -candidate.score)
+        from app.core.config import settings
+        mode = entity.metadata.get("ai_mode", "local_llm" if settings.LLM_CITIZEN_ID == str(entity.id) else "utility")
+        if mode == "local_llm" and settings.OLLAMA_MODEL:
+            from app.application.services.citizen_planner import planner
+            # Urgent motives cannot be demoted by a language model.
+            urgent = options and options[0].score >= .8 and options[0].goal_type in {
+                GoalType.SATISFY_HUNGER, GoalType.SATISFY_THIRST, GoalType.REST, GoalType.SEEK_SAFETY
+            }
+            if options and not urgent:
+                options = planner.rank(world, entity, options, tick, settings.OLLAMA_MODEL)
+        for option in options:
             try:
                 action_type, target = self._action_for(world, entity, option.goal_type)
+                if option.goal_type not in {GoalType.SATISFY_HUNGER, GoalType.SATISFY_THIRST, GoalType.REST, GoalType.SEEK_SAFETY} and retry_blocked(entity, action_type.value, target, tick):
+                    raise ValueError("Recent failure at this target; try other work before retrying.")
                 if (
                     "x" in target
                     and "y" in target
@@ -218,6 +251,9 @@ class DecisionService:
         if selected is None:
             raise ValueError("No utility option currently has a feasible action.")
         option, action_type, target = selected
+        if entity.metadata.get("llm_planner"):
+            entity.metadata["llm_planner"]["executed_goal"] = option.goal_type.value
+            entity.metadata["llm_planner"]["execution_tick"] = tick
         entity.metadata.pop("blocked_reason", None)
         entity.metadata["last_decision_reason"] = option.reason
         goal, action = self._lifecycle.start(
@@ -255,8 +291,34 @@ class DecisionService:
                     self._lifecycle.fail(
                         *abandoned, tick, "Worker is no longer active."
                     )
+        from app.application.services.group_expeditions import advance as advance_group_expeditions
+        expedition_members = advance_group_expeditions(self, world, tick, calendar.phase in {DayPhase.DAWN, DayPhase.DAY})
         for entity in autonomous:
+            from app.application.services.family_service import adult
+            if not adult(entity):
+                continue
+            from app.application.services.family_service import caregiving
+            if caregiving(self, world, entity, tick):
+                continue
+            from app.application.services.flood_response import evacuate, propose_bridge
+            if evacuate(self, world, entity, tick):
+                continue
+            if str(entity.id) in expedition_members:
+                continue
+            if entity.metadata.get("in_cave"):
+                continue
+            if entity.metadata.get("dive_trip") or entity.metadata.get("aboard"):
+                from app.application.services.expedition_service import advance_auto_voyage
+                advance_auto_voyage(self, world, entity, tick)
+                continue
+            crossing = world.movement_plans.get(str(entity.id))
+            current_tile = world.retrieve_tile(entity.x, entity.y)
+            if current_tile and current_tile.terrain.value in {"WATER", "OCEAN"} and crossing and crossing.status == MovementStatus.MOVING:
+                entity.metadata["last_decision_reason"] = "Finish the water crossing and reach shore before resuming other needs."
+                continue
             self._perception.observe(entity.id, tick)
+            if calendar.phase in {DayPhase.DAWN, DayPhase.DAY}:
+                propose_bridge(self, world, entity, tick)
             entity.metadata["decision_tick"] = tick
             threats = self._threats(world, entity)
             observed_threats = self._threats(world, entity, include_warning=False)
@@ -339,8 +401,19 @@ class DecisionService:
                     plan.status = MovementStatus.CANCELLED
                 active = None
             if active is None:
+                from app.application.services.village_service import upkeep_action
+                if upkeep_action(self, world, entity, tick, threats):
+                    continue
+                from app.application.services.community_routines import advance_routine
+                if advance_routine(self, world, entity, tick, threats):
+                    continue
+                from app.application.services.expedition_service import consider_expedition
+                if consider_expedition(self, world, entity, tick, threats):
+                    continue
                 try:
-                    self.decide(entity.id, tick)
+                    # This actor was observed above, before threat/routine checks.
+                    # No other actor advances between these points.
+                    self.decide(entity.id, tick, _already_observed=True)
                 except ValueError:
                     entity.metadata["blocked_reason"] = (
                         "No reachable known action; waiting for conditions to change."
@@ -487,11 +560,16 @@ class DecisionService:
                 action.target["structure_id"] = str(structure.id)
                 action.work_required = structure.work_required
                 self._advance_building(entity, goal, action, tick)
+            elif action.action_type == ActionType.HUNT:
+                from app.application.services.hunting import advance
+                advance(self, world, entity, goal, action, tick)
             elif action.action_type in {
                 ActionType.MOVE,
                 ActionType.GATHER,
                 ActionType.CHOP,
                 ActionType.PLUCK,
+                ActionType.FISH,
+                ActionType.COOK,
             }:
                 target_x = int(action.target["x"])
                 target_y = int(action.target["y"])
@@ -507,6 +585,10 @@ class DecisionService:
     def _continue(
         self, world: World, entity: Entity, goal: Goal, action: Action, tick: int
     ) -> None:
+        if action.action_type == ActionType.HUNT:
+            from app.application.services.hunting import advance
+            advance(self, world, entity, goal, action, tick)
+            return
         if action.action_type == ActionType.BUILD:
             try:
                 if "structure_id" not in action.target:
@@ -542,6 +624,8 @@ class DecisionService:
             ActionType.GATHER,
             ActionType.CHOP,
             ActionType.PLUCK,
+            ActionType.FISH,
+            ActionType.COOK,
         }:
             return
         try:
@@ -564,6 +648,12 @@ class DecisionService:
     def _finish_at_target(
         self, world: World, entity: Entity, goal: Goal, action: Action, tick: int
     ) -> None:
+        if action.action_type in {ActionType.FISH, ActionType.COOK}:
+            from app.application.services.fishing import advance
+            result = advance(world, entity, action, tick)
+            if result:
+                self._lifecycle.complete(goal, action, tick, result)
+            return
         if "social_with" in action.target:
             neighbour = world.entities.get(str(action.target["social_with"]))
             if (
@@ -622,6 +712,9 @@ class DecisionService:
             inventory = world.inventories[str(entity.id)]
             destination = world.inventories[str(receiver.id)]
             item = str(action.target["item"])
+            from app.application.services.diet import accepts
+            if not accepts(receiver, item):
+                raise ValueError("Recipient does not accept this food.")
             amount = min(
                 2.0,
                 inventory.items.get(item, 0),
@@ -720,10 +813,19 @@ class DecisionService:
     ) -> tuple[ActionType, dict[str, object]]:
         if goal_type == GoalType.SATISFY_HUNGER:
             inventory = world.inventories[str(entity.id)]
-            for item_type in ("fruit", "food", "mushroom", "meat"):
+            from app.application.services.diet import foods
+            if entity.diet != "vegetarian" and inventory.items.get("meat", 0) >= 1 and not any(
+                inventory.items.get(item, 0) > 0 for item in foods(entity) if item != "meat"
+            ):
+                from app.application.services.fishing import cooking_target
+                try:
+                    return cooking_target(self, world, entity, "meat")
+                except ValueError:
+                    pass
+            for item_type in foods(entity):
                 if inventory.items.get(item_type, 0.0) > 0.0:
                     return ActionType.EAT, {"item_type": item_type}
-            for item_type in ("fruit", "food", "mushroom", "meat"):
+            for item_type in foods(entity):
                 stored = self._storage_trip(world, entity, item_type, 3, True)
                 if stored:
                     return ActionType.MOVE, stored
@@ -739,6 +841,25 @@ class DecisionService:
             try:
                 return ActionType.PLUCK, self._fruit_target(world, entity)
             except ValueError:
+                if entity.diet != "vegetarian":
+                    try:
+                        return ActionType.GATHER, self._resource_target(world, entity, ResourceType.CARCASS)
+                    except ValueError:
+                        pass
+                try:
+                    from app.application.services.fishing import target
+                    if entity.diet == "vegetarian":
+                        return ActionType.GATHER, self._resource_target(world, entity, ResourceType.PLANT)
+                    return target(self, world, entity)
+                except ValueError:
+                    pass
+                if entity.diet == "vegetarian":
+                    raise ValueError("No known plant food is available; explore for food.")
+                try:
+                    from app.application.services.hunting import target as hunt_target
+                    return hunt_target(self, world, entity)
+                except ValueError:
+                    pass
                 try:
                     return ActionType.GATHER, self._resource_target(
                         world, entity, ResourceType.CARCASS
@@ -764,6 +885,17 @@ class DecisionService:
             return ActionType.REST, {}
         if goal_type == GoalType.GATHER:
             inventory = world.inventories[str(entity.id)]
+            if entity.metadata.get("village_food_shortage"):
+                for food in ("cooked_fish", "fruit", "food", "mushroom", "meat"):
+                    if inventory.items.get(food, 0) >= 4:
+                        deposit = self._storage_trip(world, entity, food, 2, False)
+                        if deposit:
+                            return ActionType.MOVE, deposit
+                if sum(inventory.items.get(f, 0) for f in ("fruit", "food", "cooked_fish", "mushroom", "meat")) < 4:
+                    try:
+                        return ActionType.PLUCK, self._fruit_target(world, entity)
+                    except ValueError:
+                        pass
             if entity.needs and entity.needs.body_temperature_c < 36.5:
                 for site in world.structures.values():
                     if (
@@ -795,6 +927,9 @@ class DecisionService:
                 ):
                     continue
                 for item in ("food", "fruit", "mushroom", "meat"):
+                    from app.application.services.diet import accepts
+                    if not accepts(neighbour, item):
+                        continue
                     if inventory.items.get(item, 0) >= 4:
                         return ActionType.MOVE, {
                             "share_with": str(neighbour.id),
@@ -814,7 +949,7 @@ class DecisionService:
             return action_type, target
         if goal_type == GoalType.CRAFT:
             inventory = world.inventories[str(entity.id)]
-            for item_type in ("stone_axe", "stone_pickaxe", "basket"):
+            for item_type in ("stone_axe", "stone_pickaxe", "basket", "boat"):
                 if inventory.items.get(item_type, 0.0) >= 1.0:
                     continue
                 recipe = ResourceService.CRAFTING_RECIPES[item_type]
@@ -823,9 +958,11 @@ class DecisionService:
             raise ValueError("No useful tool recipe is currently affordable.")
         if goal_type == GoalType.BUILD:
             knowledge = world.entity_knowledge[str(entity.id)]
+            group = world.groups.get(str(entity.group_id))
+            project = group.community_project if group else {}
             for site in sorted(
                 world.structures.values(),
-                key=lambda s: entity.distance_squared_to(s.x, s.y),
+                key=lambda s: (not (project.get("status") == "agreed" and project.get("target") == str(s.id)), entity.distance_squared_to(s.x, s.y)),
             ):
                 if site.completed or str(site.id) not in knowledge.structures:
                     continue
@@ -835,6 +972,13 @@ class DecisionService:
                     for material in missing
                 )
                 if missing and not can_deliver:
+                    continue
+                # One builder per funded site; material trips remain separate work.
+                if not missing and any(
+                    actor_id != str(entity.id) and world.actions[action_id].target.get("structure_id") == str(site.id)
+                    and world.actions[action_id].target.get("purpose") == "build"
+                    for actor_id, action_id in world.active_actions.items() if action_id in world.actions
+                ):
                     continue
                 workers = sum(
                     1
@@ -960,6 +1104,8 @@ class DecisionService:
                     "Already on safe terrain; no safer destination is known."
                 )
             return ActionType.MOVE, safe
+        if goal_type == GoalType.EXPLORE:
+            return ActionType.MOVE, self._exploration_target(world, entity)
         social = self._social_target(world, entity)
         return ActionType.MOVE, social or self._exploration_target(world, entity)
 
@@ -989,7 +1135,11 @@ class DecisionService:
                 and entity.distance_squared_to(other.x, other.y) <= 2
                 and other.metadata.get("state") != "sleep"
             ),
-            key=lambda other: str(other.id),
+            key=lambda other: (
+                -world.social_bonds[f"{entity.id}:{other.id}"].trust
+                if f"{entity.id}:{other.id}" in world.social_bonds else 0,
+                str(other.id),
+            ),
         )
         if not neighbours:
             return None
@@ -1158,6 +1308,16 @@ class DecisionService:
                 missing
             )
             for _, material in missing:
+                community_site = next((str(site.id) for site in world.structures.values()
+                    if not site.completed and str(site.id) in knowledge.structures
+                    and site.missing_materials == recipe), None)
+                if community_site and any(
+                    actor_id != str(entity.id)
+                    and world.actions[action_id].target.get("community_site") == community_site
+                    and world.actions[action_id].target.get("material") == material
+                    for actor_id, action_id in world.active_actions.items() if action_id in world.actions
+                ):
+                    continue
                 stored = DecisionService._storage_trip(
                     world,
                     entity,
@@ -1204,6 +1364,8 @@ class DecisionService:
                         world, entity, target
                     )
                     interaction["material"] = material
+                    if community_site:
+                        interaction["community_site"] = community_site
                     interaction["amount"] = recipe[material] - inventory.items.get(
                         material, 0.0
                     )
@@ -1240,7 +1402,8 @@ class DecisionService:
             if (
                 str(store.id) not in knowledge.structures
                 or not store.completed
-                or store.structure_type != StructureType.STORAGE
+                or (store.structure_type != StructureType.STORAGE and not
+                    (store.bed_capacity > 0 and str(entity.id) in store.resident_ids))
             ):
                 continue
             if withdraw and store.stockpile.items.get(material, 0) <= 0:
@@ -1420,15 +1583,20 @@ class DecisionService:
                 return {"x": target.x, "y": target.y, "purpose": "avoid_wildlife"}
         assigned_home_id = str(entity.metadata.get("assigned_home_id", ""))
         assigned_home = world.structures.get(assigned_home_id)
+        if assigned_home is not None and (
+            not assigned_home.completed or str(entity.id) not in assigned_home.resident_ids
+        ):
+            assigned_home = None
         if assigned_home is None:
             available = [home for home in world.structures.values()
                          if home.completed and home.structure_type in {StructureType.SHELTER, StructureType.TENT}
                          and str(home.id) in knowledge.structures
-                         and len(home.resident_ids) < home.bed_capacity]
+                         and (str(entity.id) in home.resident_ids or len(home.resident_ids) < home.bed_capacity)]
             if available:
                 assigned_home = min(available, key=lambda home: (entity.distance_squared_to(home.x, home.y), str(home.id)))
                 assigned_home_id = str(assigned_home.id)
-                assigned_home.resident_ids.append(str(entity.id))
+                if str(entity.id) not in assigned_home.resident_ids:
+                    assigned_home.resident_ids.append(str(entity.id))
                 entity.metadata.update(assigned_home_id=assigned_home_id, bed_index=len(assigned_home.resident_ids) - 1, homeless=False)
         if (
             assigned_home is not None
@@ -1574,19 +1742,40 @@ class DecisionService:
 
     @staticmethod
     def _exploration_target(world: World, entity: Entity) -> dict[str, object]:
+        from app.application.services.world_secrets import target as discovery_target
+        investigation = discovery_target(world, entity)
+        if investigation:
+            return investigation
         knowledge = world.entity_knowledge[str(entity.id)]
+        known = {(record.x, record.y) for record in knowledge.tiles.values()}
+        warning = entity.metadata.get("wildlife_warning", {})
+        def frontier(record):
+            return sum((record.x + dx, record.y + dy) not in known
+                       for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                       if 0 <= record.x + dx < world.width and 0 <= record.y + dy < world.height)
         candidates = [
             record
             for record in knowledge.tiles.values()
             if bool(record.data.get("walkable", False))
             and (record.x, record.y) != (entity.x, entity.y)
+            and frontier(record) > 0
+            and not (warning.get("expires", -1) >= knowledge.last_observation_tick
+                     and (record.x-warning.get("x", -999))**2 + (record.y-warning.get("y", -999))**2 <= 36)
         ]
         if not candidates:
             raise ValueError("No known exploration frontier is available.")
+        from app.application.services.adaptive_learning import danger_cost, retry_blocked
+        candidates = [record for record in candidates if not retry_blocked(entity, "MOVE", {"x": record.x, "y": record.y, "purpose": "explore"}, knowledge.last_observation_tick)]
+        if not candidates:
+            raise ValueError("Known frontiers recently failed; wait before retrying.")
+        from app.application.services.world_secrets import frontier_interest
         target = max(
             candidates,
             key=lambda item: (
-                entity.distance_squared_to(item.x, item.y),
+                -danger_cost(entity, item.x, item.y, knowledge.last_observation_tick),
+                frontier(item),
+                frontier_interest(entity, knowledge, item),
+                -entity.distance_squared_to(item.x, item.y),
                 -item.last_seen_tick,
                 item.key,
             ),

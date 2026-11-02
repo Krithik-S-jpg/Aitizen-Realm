@@ -1,6 +1,7 @@
 """Deterministic utility scoring from an entity's own state and knowledge."""
 
 from app.application.services.construction_service import ConstructionService
+from app.application.services.diet import foods
 from app.domain.models.cognition import GoalType, UtilityOption
 from app.domain.models.entity import Entity, EntityKnowledge
 from app.domain.models.inventory import Inventory
@@ -47,7 +48,7 @@ class UtilityService:
         needs = entity.needs
         carried_edible = sum(
             inventory.items.get(item, 0.0)
-            for item in ("food", "fruit", "mushroom", "meat")
+            for item in foods(entity)
         )
         food_bonus = 0.12 if carried_edible > 0.0 else 0.0
         axe_recipe = {"wood": 2.0, "stone": 3.0}
@@ -62,7 +63,10 @@ class UtilityService:
         can_craft_basket = inventory.items.get("basket", 0.0) < 1.0 and inventory.has(
             basket_recipe
         )
-        can_craft_tool = can_craft_axe or can_craft_pickaxe or can_craft_basket
+        can_craft_boat = inventory.items.get("boat", 0) < 1 and inventory.has({"wood": 20.0, "fiber": 8.0}) and any(
+            str(record.data.get("terrain", "")).lower() in {"water", "ocean"}
+            for record in knowledge.tiles.values())
+        can_craft_tool = can_craft_axe or can_craft_pickaxe or can_craft_basket or can_craft_boat
         known_structure_types = {
             str(record.data.get("type", ""))
             for record in knowledge.structures.values()
@@ -154,8 +158,22 @@ class UtilityService:
             ),
             UtilityOption(
                 goal_type=GoalType.EXPLORE,
-                score=0.30 if not knowledge.resources else 0.16,
+                score=0.56 if needs.hunger < 40 and needs.thirst < 40 and needs.energy > 70 and needs.health > 75 and needs.safety > 70 and (has_basic_tool or "storage" not in known_structure_types) else (0.30 if not knowledge.resources else 0.16),
                 reason=f"Only {len(knowledge.tiles)} tiles are known.",
             ),
         ]
+        if knowledge.discoveries and needs.hunger < 40 and needs.thirst < 40 and needs.energy > 70 and needs.health > 75 and needs.safety > 70:
+            for option in options:
+                if option.goal_type == GoalType.EXPLORE:
+                    interest = float(entity.metadata.get("curiosity", {}).get("history", .5))
+                    option.score = max(option.score, .50 + interest * .12)
+                    option.reason = "Follow personally known clues; history curiosity %.0f%%." % (interest * 100)
+        from app.application.services.family_service import stage, needs_light_duties
+        if stage(entity) == "elder" or needs_light_duties(entity):
+            for option in options:
+                if option.goal_type == GoalType.REST and needs.energy < 65:
+                    option.score = max(option.score, .72)
+                    option.reason = "Take an earlier rest to pace age, pregnancy or recovery needs."
+                elif option.goal_type in {GoalType.BUILD, GoalType.EXPLORE} and needs.energy < 65:
+                    option.score *= .5
         return sorted(options, key=lambda item: (-item.score, item.goal_type.value))

@@ -1,7 +1,7 @@
 """Generic world entities and their persistent limited knowledge."""
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_serializer
@@ -29,6 +29,8 @@ class CitizenAvatar(StrEnum):
     MINER = "miner"
     FISHER = "fisher"
     ARTISAN = "artisan"
+    JUNIPER = "juniper"
+    ROWAN = "rowan"
 
 
 class Entity(BaseModel):
@@ -48,6 +50,8 @@ class Entity(BaseModel):
     skills: dict[str, float] = Field(default_factory=dict)
     group_id: UUID | None = None
     avatar_id: CitizenAvatar = CitizenAvatar.SCOUT
+    gender: Literal["unspecified", "female", "male", "nonbinary"] = "unspecified"
+    diet: Literal["omnivore", "vegetarian"] = "omnivore"
 
     @field_serializer("tags", when_used="json")
     def serialize_tags(self, value: set[str]) -> list[str]:
@@ -93,3 +97,4 @@ class EntityKnowledge(BaseModel):
     resources: dict[str, KnowledgeRecord] = Field(default_factory=dict)
     structures: dict[str, KnowledgeRecord] = Field(default_factory=dict)
     entities: dict[str, KnowledgeRecord] = Field(default_factory=dict)
+    discoveries: dict[str, KnowledgeRecord] = Field(default_factory=dict)

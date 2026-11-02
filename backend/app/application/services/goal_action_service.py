@@ -28,6 +28,9 @@ class GoalActionService:
     ) -> tuple[Goal, Action]:
         """Starts a new goal and its first action."""
         world = self._require_world()
+        from app.application.services.family_service import adult
+        if not adult(entity) and action_type in {ActionType.HUNT, ActionType.FISH, ActionType.CHOP, ActionType.BUILD, ActionType.CRAFT}:
+            raise ValueError("Minors cannot perform dangerous independent work.")
         if str(entity.id) in world.active_goals:
             raise ValueError("Entity already has an active goal.")
         goal = Goal(
@@ -123,6 +126,8 @@ class GoalActionService:
         entity = world.entities.get(str(goal.entity_id))
         if entity is None:
             return
+        from app.application.services.adaptive_learning import record_outcome
+        record_outcome(entity, action, tick, succeeded)
         skill = {
             ActionType.CHOP: "woodcutting",
             ActionType.GATHER: "foraging",
