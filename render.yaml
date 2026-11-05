@@ -1,0 +1,19 @@
+# Backend-only private demo. One process owns the in-memory simulation.
+services:
+  - type: web
+    name: aitizen-realm-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements-hosted.txt
+    startCommand: python -m uvicorn app.hosted:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: HOSTED_ADMIN_TOKEN
+        generateValue: true
+      - key: LOCAL_RECOVERY_ENABLED
+        value: "false"
+      - key: OLLAMA_MODEL
+        value: ""

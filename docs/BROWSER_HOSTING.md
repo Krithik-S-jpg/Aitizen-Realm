@@ -35,6 +35,30 @@ and `index.wasm` (39,509,339 bytes). Both large files exceed Cloudflare Pages'
 do not assume the export can be uploaded unchanged. Browser runtime testing is
 still pending; export success is not proof of a playable browser session.
 
-Current blocker: the owner has no server account yet, so no authenticated public
-backend origin exists. No production deployment is claimed. Account creation and
-provider identity/payment verification must be completed by the owner.
+## Private local demo
+
+The opt-in `app.browser_demo:app` entry point serves the exported game at
+`/game/` alongside the existing API and WebSocket routes. Start it from backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.browser_demo:app --host 127.0.0.1 --port 8000
+```
+
+Run only one backend on this port. Keep Ollama on localhost:11434. Start the
+downloaded Cloudflare tool from the repository root with an explicit owner email:
+
+```powershell
+.\.local-build\cloudflared.exe tunnel --url http://127.0.0.1:8000 --allowed-mail YOUR_EMAIL --no-autoupdate
+```
+
+Never omit `--allowed-mail`: the simulation API does not yet implement player
+authorization. Open the printed HTTPS URL with `/game/` appended and complete
+the email PIN prompt. The URL changes on restart, and the computer, backend,
+Ollama and tunnel must remain running. This is a private demo, not production.
+
+Verified locally: game HTML and simulation state return HTTP 200; Ollama lists
+qwen2.5:1.5b. Verified through the protected tunnel: unauthenticated game, API
+and WebSocket-path HTTP requests redirect to the Cloudflare login page.
+Authenticated browser rendering and live WebSocket play still require the
+owner to complete email verification. Model availability alone does not prove
+citizen inference is working end to end.
