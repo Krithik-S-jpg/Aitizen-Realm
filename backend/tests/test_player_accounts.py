@@ -1,0 +1,58 @@
+"""Player identities cannot become owner sessions or duplicate citizens."""
+import os
+import time
+from types import SimpleNamespace
+
+os.environ.setdefault('HOSTED_ADMIN_TOKEN', 'test-only-'+'x'*40)
+from starlette.testclient import TestClient
+from app import player_accounts as accounts
+from app.hosted import HostedBackend
+from starlette.applications import Starlette
+
+
+def test_player_session_is_not_admin(monkeypatch):
+    monkeypatch.setenv('HOSTED_ADMIN_TOKEN', 'test-only-'+'x'*40)
+    client = TestClient(HostedBackend(Starlette(), os.environ['HOSTED_ADMIN_TOKEN']), base_url='https://testserver')
+    signed = accounts.seal({'uid':'test-user','name':'Citizen','exp':time.time()+3600})
+    client.cookies.set(accounts.COOKIE, signed)
+    assert client.get('/api/v1/simulation/state').status_code == 401
+    assert accounts.unseal(signed)['uid'] == 'test-user'
+    assert accounts.unseal(signed+'x') is None
+    assert accounts.unseal(accounts.seal({'exp':time.time()-1})) is None
+
+
+def test_repeat_join_reuses_citizen(monkeypatch):
+    monkeypatch.setattr(accounts, 'config', lambda: ('https://supabase.test','public-key','https://testserver'))
+    created = []
+    class Service:
+        def create(self, *args, **kwargs):
+            citizen = SimpleNamespace(name='Citizen',metadata={},active=True)
+            created.append(citizen)
+            return citizen
+    monkeypatch.setattr(accounts, 'linked_citizen', lambda uid: (Service(),SimpleNamespace(width=64,height=64),created[0] if created else None))
+    client = TestClient(accounts.portal, base_url='https://testserver')
+    client.cookies.set(accounts.COOKIE, accounts.seal({'uid':'test-user','name':'Citizen','exp':time.time()+3600}))
+    for _ in range(2):
+        assert client.post('/account/join',headers={'origin':'https://testserver'},follow_redirects=False).status_code == 303
+    assert len(created) == 1
+    assert created[0].metadata['account_user_id'] == 'test-user'
+    assert client.post('/account/join',headers={'origin':'https://evil.test'}).status_code == 409
+
+
+def test_google_pkce_and_password_verification(monkeypatch):
+    monkeypatch.setattr(accounts, 'config', lambda: ('https://supabase.test','public-key','https://testserver'))
+    client = TestClient(accounts.portal, base_url='https://testserver')
+    response = client.get('/account/google',follow_redirects=False)
+    assert 'code_challenge=' in response.headers['location']
+    assert 'code_challenge_method=s256' in response.headers['location']
+    assert 'HttpOnly' in response.headers['set-cookie']
+    assert client.get('/account/callback').status_code == 400
+    async def fake_auth(path, body=None, token=None):
+        if path.startswith('token'):
+            return {'access_token':'verified-upstream'}
+        assert token == 'verified-upstream'
+        return {'id':'12345678-1234-1234-1234-123456789012','email_confirmed_at':'today','user_metadata':{'display_name':'Alice'}}
+    monkeypatch.setattr(accounts,'auth_call',fake_auth)
+    response = client.post('/account/password',data={'email':'alice@example.com','password':'test-password'},headers={'origin':'https://testserver'},follow_redirects=False)
+    assert response.status_code == 303
+    assert 'verified-upstream' not in response.headers['set-cookie']

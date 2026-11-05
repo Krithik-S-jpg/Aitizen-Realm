@@ -18,10 +18,12 @@ config/name="Aitizen Realm"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 run/max_fps=60
+run/max_fps.web=30
 
 [display]
 
 window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
 
 [rendering]
 

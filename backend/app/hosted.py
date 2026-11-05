@@ -51,6 +51,9 @@ class HostedBackend:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
             return await self.wrapped(scope, receive, send)
+        if scope["type"] == "http" and (scope["path"] == "/account" or scope["path"].startswith("/account/")):
+            from app.player_accounts import portal
+            return await portal(scope, receive, send)
         if scope["type"] == "http" and scope["path"] == "/healthz" and scope["method"] == "GET":
             return await JSONResponse({"status": "ok"})(scope, receive, send)
         headers = dict(scope.get("headers", []))
@@ -66,7 +69,7 @@ class HostedBackend:
         if scope["type"] == "http" and path == "/login" and method == "GET":
             response = HTMLResponse('''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Aitizen Realm — Sign in</title><style>body{background:#0d1823;color:#e6f3f1;font:18px system-ui;max-width:480px;margin:12vh auto;padding:24px}input,button{box-sizing:border-box;width:100%;padding:14px;margin:12px 0;background:#19362f;color:white;border:1px solid #69baa5;border-radius:8px}</style>
-<h1>Aitizen Realm</h1><p>Sign in to your hosted simulation.</p>
+<h1>Aitizen Realm</h1><p>Administrator sign-in</p><p><a href="/account">Player sign-in: email or Google</a></p>
 <form method="post" action="/login"><label for="key">Owner access key</label><input id="key" name="key" type="password" required autocomplete="current-password"><button>Sign in</button></form>''', headers={"Cache-Control":"no-store", "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"})
             return await response(scope, receive, send)
         if scope["type"] == "http" and path == "/login" and method == "POST":
