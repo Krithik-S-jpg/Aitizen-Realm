@@ -10,10 +10,16 @@ startup without a token of at least 32 characters. /healthz is public; every
 other HTTP route and WebSocket handshake requires Authorization: Bearer TOKEN.
 The ordinary local app.main and app.browser_demo entry points are unchanged.
 
-This is backend staging, not a playable public browser deployment yet. Browser
-sign-in/session integration is needed before connecting the Godot web client;
-browser WebSockets cannot set an arbitrary Authorization header. A server-side
-session gateway must mediate that connection without revealing the owner token.
+This is backend staging, not a playable public browser deployment yet. Open
+the service root to sign in using HOSTED_ADMIN_TOKEN from Render's Environment
+settings. Enter it only on the HTTPS sign-in page. A signed, Secure, HttpOnly,
+SameSite=Strict cookie expires after 12 hours; the owner token is not stored in
+the cookie. Logout clears it. Rotating the token invalidates existing sessions.
+Cookie-authenticated mutations and WebSockets require a matching HTTPS Origin.
+Bearer authentication remains supported for trusted server clients.
+The game must be served on this same origin to use the browser session; a game
+on a different host is not connected by this change. Local HTTP demos still use
+app.browser_demo and do not use these HTTPS-only cookies.
 
 Use one worker only: this simulation stores its active world in process memory.
 Free Render services sleep after idle periods and lose local disk contents on
