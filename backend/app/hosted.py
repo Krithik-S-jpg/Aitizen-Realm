@@ -9,12 +9,18 @@ import secrets
 import hashlib
 import hmac
 import time
+from pathlib import Path
 from http.cookies import CookieError, SimpleCookie
 from urllib.parse import parse_qs
 
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.staticfiles import StaticFiles
 
 from app.main import app as simulation_app
+
+WEB_BUILD = Path(__file__).resolve().parents[1] / "web"
+if (WEB_BUILD / "index.html").is_file():
+    simulation_app.mount("/game", StaticFiles(directory=WEB_BUILD, html=True), name="hosted-game")
 
 
 class HostedBackend:
@@ -88,7 +94,7 @@ class HostedBackend:
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})
                 return
-            if path == "/" and method == "GET":
+            if path in ("/", "/game", "/game/") and method == "GET":
                 return await RedirectResponse("/login", status_code=303)(scope, receive, send)
             return await JSONResponse(
                 {"detail": "Owner authentication required"}, status_code=401,
@@ -99,6 +105,8 @@ class HostedBackend:
             response.delete_cookie("__Host-aitizen", secure=True, httponly=True, samesite="strict")
             return await response(scope, receive, send)
         if scope["type"] == "http" and path == "/" and method == "GET":
+            if (WEB_BUILD / "index.html").is_file():
+                return await RedirectResponse("/game/", status_code=303)(scope, receive, send)
             return await HTMLResponse('<title>Aitizen Realm</title><h1>Backend connected</h1><p>You are signed in. Browser game deployment and the local Ollama worker are the next steps.</p><p><a href="/api/v1/simulation/state">View simulation status</a></p><form method="post" action="/logout"><button>Sign out</button></form>', headers={"Cache-Control":"no-store"})(scope, receive, send)
         await self.wrapped(scope, receive, send)
 

@@ -51,3 +51,18 @@ def test_sessions():
     assert client.get('/state').status_code == 401
     assert client.get('/state', headers={'Authorization':'Bearer '+TOKEN}).status_code == 200
 
+
+def test_export_requires_login():
+    from app.hosted import simulation_app, WEB_BUILD
+    if not (WEB_BUILD / 'index.html').is_file():
+        pytest.skip('Browser export not staged')
+    client = TestClient(HostedBackend(simulation_app, TOKEN), base_url='https://testserver')
+    assert client.get('/game/').url.path == '/login'
+    assert client.get('/game/index.pck').status_code == 401
+    client.post('/login', data={'key': TOKEN}, headers=ORIGIN, follow_redirects=False)
+    response = client.get('/')
+    assert response.url.path == '/game/'
+    assert '<canvas' in response.text
+    assert client.head('/game/index.wasm').status_code == 200
+    assert client.get('/game/../../.env').status_code in (404, 400)
+
