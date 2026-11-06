@@ -67,11 +67,10 @@ class HostedBackend:
         path = scope["path"]
         method = scope.get("method", "")
         if scope["type"] == "http" and path == "/login" and method == "GET":
-            response = HTMLResponse('''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Aitizen Realm — Sign in</title><style>body{background:#0d1823;color:#e6f3f1;font:18px system-ui;max-width:480px;margin:12vh auto;padding:24px}input,button{box-sizing:border-box;width:100%;padding:14px;margin:12px 0;background:#19362f;color:white;border:1px solid #69baa5;border-radius:8px}</style>
-<h1>Aitizen Realm</h1><p>Administrator sign-in</p><p><a href="/account">Player sign-in: email or Google</a></p>
-<form method="post" action="/login"><label for="key">Owner access key</label><input id="key" name="key" type="password" required autocomplete="current-password"><button>Sign in</button></form>''', headers={"Cache-Control":"no-store", "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"})
-            return await response(scope, receive, send)
+            return await RedirectResponse("/account", status_code=303)(scope, receive, send)
+        if scope["type"] == "http" and path == "/admin/login" and method == "GET":
+            from app.auth_design import realm_page, ADMIN_FORM
+            return await realm_page(ADMIN_FORM)(scope, receive, send)
         if scope["type"] == "http" and path == "/login" and method == "POST":
             if not same_origin:
                 return await JSONResponse({"detail":"Origin rejected"}, status_code=403)(scope, receive, send)
@@ -98,13 +97,13 @@ class HostedBackend:
                 await send({"type": "websocket.close", "code": 1008})
                 return
             if path in ("/", "/game", "/game/") and method == "GET":
-                return await RedirectResponse("/login", status_code=303)(scope, receive, send)
+                return await RedirectResponse("/account", status_code=303)(scope, receive, send)
             return await JSONResponse(
                 {"detail": "Owner authentication required"}, status_code=401,
                 headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
             )(scope, receive, send)
         if scope["type"] == "http" and path == "/logout" and method == "POST":
-            response = RedirectResponse("/login", status_code=303)
+            response = RedirectResponse("/account", status_code=303)
             response.delete_cookie("__Host-aitizen", secure=True, httponly=True, samesite="strict")
             return await response(scope, receive, send)
         if scope["type"] == "http" and path == "/" and method == "GET":

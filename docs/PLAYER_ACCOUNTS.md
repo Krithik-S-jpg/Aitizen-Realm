@@ -1,5 +1,10 @@
 # Player accounts setup
 
+Public visitors at `/` or `/login` land on `/account`. Owner access is available
+through the discreet administrator link at `/admin/login`; its form continues
+posting to `/login`. The shared responsive design uses CSS scenery and motion,
+honors reduced-motion preferences, and needs no external scripts or image fetches.
+
 The hosted owner login remains administrator-only. `/account` adds player
 email/password registration, verified-email login, and Google OAuth with PKCE.
 Player sessions never unlock the owner API or the admin Godot client.

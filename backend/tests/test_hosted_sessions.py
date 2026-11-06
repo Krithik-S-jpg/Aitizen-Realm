@@ -27,7 +27,13 @@ async def socket(ws):
 def test_sessions():
     app = HostedBackend(Starlette(routes=[Route('/state', state, methods=['GET','POST']), WebSocketRoute('/ws', socket)]), TOKEN)
     client = TestClient(app, base_url='https://testserver')
-    assert client.get('/').url.path == '/login'
+    assert client.get('/').url.path == '/account'
+    landing = client.get('/login')
+    assert landing.url.path == '/account'
+    assert 'Continue with Google' in landing.text
+    assert 'name="key"' not in landing.text
+    assert 'name="key"' in client.get('/admin/login').text
+    assert 'prefers-reduced-motion' in landing.text
     assert client.get('/healthz').status_code == 200
     assert client.get('/state').status_code == 401
     assert client.post('/login', data={'key':TOKEN}).status_code == 403
@@ -57,7 +63,7 @@ def test_export_requires_login():
     if not (WEB_BUILD / 'index.html').is_file():
         pytest.skip('Browser export not staged')
     client = TestClient(HostedBackend(simulation_app, TOKEN), base_url='https://testserver')
-    assert client.get('/game/').url.path == '/login'
+    assert client.get('/game/').url.path == '/account'
     assert client.get('/game/index.pck').status_code == 401
     client.post('/login', data={'key': TOKEN}, headers=ORIGIN, follow_redirects=False)
     response = client.get('/')

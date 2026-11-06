@@ -40,10 +40,7 @@ def unseal(value):
         return None
 
 
-def page(content, status=200):
-    return HTMLResponse('''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aitizen Realm accounts</title>
-<style>body{background:#0c1721;color:#e2eeed;font:17px system-ui;max-width:560px;margin:7vh auto;padding:24px}input,button{box-sizing:border-box;width:100%;padding:14px;margin:8px 0;border-radius:8px;border:1px solid #456b70;background:#18322f;color:white}a{color:#8bd9ca}small{color:#acbfc4}</style>'''+content,
-        status_code=status, headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"})
+from app.auth_design import realm_page as page, PLAYER_FORM
 
 
 def config():
@@ -110,9 +107,7 @@ def linked_citizen(uid):
 async def account(request):
     user = identity(request)
     if not user:
-        return page('''<h1>Join Aitizen Realm</h1><p>Your account, your citizen, one shared world.</p>
-<form method="post" action="/account/password"><label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="password" type="password" autocomplete="current-password" minlength="8" required></label><label>Citizen name (new accounts)<input name="name" maxlength="80"></label><button name="action" value="login">Sign in</button><button name="action" value="signup">Create account</button></form>
-<p><a href="/account/google">Continue with Google</a></p><small>New email accounts require email confirmation.</small><p><a href="/login">Administrator sign-in</a></p>''')
+        return page(PLAYER_FORM)
     content = '<h1>Welcome, '+html.escape(user['name'])+'</h1>'
     try:
         _, _, entity = linked_citizen(user['uid'])
