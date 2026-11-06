@@ -13,7 +13,7 @@ from pathlib import Path
 from http.cookies import CookieError, SimpleCookie
 from urllib.parse import parse_qs
 
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from app.main import app as simulation_app
@@ -51,6 +51,8 @@ class HostedBackend:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
             return await self.wrapped(scope, receive, send)
+        if scope["type"] == "http" and scope["path"] == "/auth-assets/realm-v2.png" and scope["method"] in ("GET", "HEAD"):
+            return await FileResponse(Path(__file__).with_name("auth_assets") / "realm-v2.png", headers={"Cache-Control": "public, max-age=86400"})(scope, receive, send)
         if scope["type"] == "http" and (scope["path"] == "/account" or scope["path"].startswith("/account/")):
             from app.player_accounts import portal
             return await portal(scope, receive, send)

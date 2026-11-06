@@ -34,6 +34,9 @@ def test_sessions():
     assert 'name="key"' not in landing.text
     assert 'name="key"' in client.get('/admin/login').text
     assert 'prefers-reduced-motion' in landing.text
+    assert '/auth-assets/realm-v2.png' in landing.text
+    assert client.head('/auth-assets/realm-v2.png').status_code == 200
+    assert client.get('/auth-assets/not-public').status_code == 401
     assert client.get('/healthz').status_code == 200
     assert client.get('/state').status_code == 401
     assert client.post('/login', data={'key':TOKEN}).status_code == 403
