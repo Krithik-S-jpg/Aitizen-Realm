@@ -36,6 +36,9 @@ func _ready() -> void:
 	_token = LineEdit.new()
 	_token.secret = true
 	_token.placeholder_text = "Backend CHECKPOINT_ADMIN_TOKEN (session only; never your Supabase key)"
+	if OS.has_feature("web"):
+		_token.placeholder_text = "Optional token for local servers; hosted saves use your admin sign-in"
+		_status.text = "Hosted admin session ready · select Check connection."
 	add_child(_token)
 	_label = LineEdit.new()
 	_label.placeholder_text = "Save name, e.g. Before winter"
@@ -141,7 +144,7 @@ func _confirm_overwrite() -> void:
 func _send(operation: String, path: String, method := HTTPClient.METHOD_GET, payload: Dictionary = {}) -> void:
 	if not _operation.is_empty():
 		return
-	if _token.text.strip_edges().is_empty():
+	if _token.text.strip_edges().is_empty() and not OS.has_feature("web"):
 		_status.text = "Authentication needed: enter the backend admin token."
 		return
 	_operation = operation

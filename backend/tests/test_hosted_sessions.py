@@ -81,3 +81,18 @@ def test_export_requires_login():
     assert client.head('/game/index.wasm').status_code == 200
     assert client.get('/game/../../.env').status_code in (404, 400)
 
+
+def test_checkpoint_accepts_verified_owner_only():
+    from fastapi import FastAPI, Depends
+    from app.infrastructure.api.v1.checkpoints import require_admin_token
+    underlying = FastAPI()
+    @underlying.get('/checkpoint', dependencies=[Depends(require_admin_token)])
+    def checkpoint():
+        return {'authorized':True}
+    raw = TestClient(underlying)
+    assert raw.get('/checkpoint', headers={'hosted_owner_authenticated':'true'}).status_code == 401
+    client = TestClient(HostedBackend(underlying, TOKEN), base_url='https://testserver')
+    assert client.get('/checkpoint').status_code == 401
+    client.post('/login', data={'key':TOKEN}, headers=ORIGIN, follow_redirects=False)
+    assert client.get('/checkpoint').status_code == 200
+

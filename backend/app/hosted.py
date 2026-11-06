@@ -113,6 +113,9 @@ class HostedBackend:
             if (WEB_BUILD / "index.html").is_file():
                 return await RedirectResponse("/game/", status_code=303)(scope, receive, send)
             return await HTMLResponse('<title>Aitizen Realm</title><h1>Backend connected</h1><p>You are signed in. Browser game deployment and the local Ollama worker are the next steps.</p><p><a href="/api/v1/simulation/state">View simulation status</a></p><form method="post" action="/logout"><button>Sign out</button></form>', headers={"Cache-Control":"no-store"})(scope, receive, send)
+        # Only the verified owner gate can set this internal ASGI state.
+        scope = dict(scope)
+        scope["state"] = {**scope.get("state", {}), "hosted_owner_authenticated": True}
         await self.wrapped(scope, receive, send)
 
 

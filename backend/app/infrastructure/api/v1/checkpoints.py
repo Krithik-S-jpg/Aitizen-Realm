@@ -4,7 +4,7 @@ import secrets
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.core.config import settings
@@ -68,8 +68,10 @@ class RestorablePayload(BaseModel):
         return self
 
 
-def require_admin_token(x_admin_token: str = Header(default="")) -> None:
+def require_admin_token(request: Request, x_admin_token: str = Header(default="")) -> None:
     """Fail closed unless an explicit backend admin token matches."""
+    if getattr(request.state, "hosted_owner_authenticated", False):
+        return
     token = settings.CHECKPOINT_ADMIN_TOKEN.get_secret_value()
     if not token or not secrets.compare_digest(token, x_admin_token):
         raise HTTPException(401, "A valid X-Admin-Token is required")
