@@ -89,7 +89,9 @@ async def finish_login(tokens):
         # Login is still possible while the admin is preparing a world.
         pass
     response = RedirectResponse('/account', status_code=303)
-    response.set_cookie(COOKIE, seal({'uid':uid,'name':name,'exp':int(time.time())+3600}), max_age=3600, secure=True, httponly=True, samesite='strict')
+    # Google returns through a cross-site top-level navigation. Lax permits
+    # that redirect; all player mutations still require an exact Origin.
+    response.set_cookie(COOKIE, seal({'uid':uid,'name':name,'exp':int(time.time())+3600}), max_age=3600, secure=True, httponly=True, samesite='lax')
     response.delete_cookie('__Host-oauth', secure=True, httponly=True, samesite='lax')
     return response
 
@@ -204,7 +206,7 @@ async def logout(request):
     except ValueError:
         return JSONResponse({'detail':'Origin rejected'}, status_code=403)
     response = RedirectResponse('/account', status_code=303)
-    response.delete_cookie(COOKIE, secure=True, httponly=True, samesite='strict')
+    response.delete_cookie(COOKIE, secure=True, httponly=True, samesite='lax')
     return response
 
 

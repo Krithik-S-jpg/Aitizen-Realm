@@ -89,3 +89,35 @@ def test_closed_world_and_inactive_citizen(monkeypatch):
     monkeypatch.setattr(accounts,'linked_citizen',lambda uid: (None,world,entity))
     assert accounts.ensure_citizen('uid','Citizen') is entity
     assert not entity.tags
+
+
+def test_google_callback_creates_usable_player_session(monkeypatch):
+    monkeypatch.setattr(accounts,'config',lambda: ('https://supabase.test','public-key','https://testserver'))
+    monkeypatch.setattr(accounts,'ensure_citizen',lambda uid,name: None)
+    world = SimpleNamespace(shared_world=SimpleNamespace(name='Our realm',accepting_players=True))
+    citizen = SimpleNamespace(name='Alice',active=True)
+    monkeypatch.setattr(accounts,'linked_citizen',lambda uid: (None,world,citizen))
+    calls = []
+    async def fake_auth(path, body=None, token=None):
+        calls.append(path)
+        if path == 'token?grant_type=pkce':
+            assert body['auth_code'] == 'test-code'
+            assert len(body['code_verifier']) >= 43
+            return {'access_token':'upstream-secret'}
+        assert token == 'upstream-secret'
+        return {'id':'12345678-1234-1234-1234-123456789012','email_confirmed_at':'today','user_metadata':{'full_name':'Alice'}}
+    monkeypatch.setattr(accounts,'auth_call',fake_auth)
+    client = TestClient(accounts.portal,base_url='https://testserver')
+    client.get('/account/google',follow_redirects=False)
+    response = client.get('/account/callback?code=test-code',follow_redirects=False)
+    assert response.status_code == 303
+    cookie = next(c for c in response.headers.get_list('set-cookie') if c.startswith(accounts.COOKIE+'='))
+    assert 'SameSite=lax' in cookie
+    assert 'Secure' in cookie and 'HttpOnly' in cookie and 'Path=/' in cookie
+    assert 'upstream-secret' not in cookie
+    assert 'Welcome, Alice' in client.get('/account').text
+    assert client.post('/account/logout',headers={'origin':'https://evil.test'}).status_code == 403
+    assert 'Welcome, Alice' in client.get('/account').text
+    assert client.post('/account/logout',headers={'origin':'https://testserver'},follow_redirects=False).status_code == 303
+    assert 'Continue with Google' in client.get('/account').text
+    assert calls == ['token?grant_type=pkce','user']
