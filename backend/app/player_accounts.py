@@ -146,6 +146,10 @@ async def account(request):
 
 
 async def password(request):
+    # A bookmark, reopened tab, or browser navigation can GET the form target.
+    # Only POST may authenticate; send navigation back to the actual form.
+    if request.method in ('GET', 'HEAD'):
+        return RedirectResponse('/account', status_code=303)
     try:
         data = await fields(request)
         body = {'email':data.get('email',''), 'password':data.get('password','')}
@@ -204,4 +208,4 @@ async def logout(request):
     return response
 
 
-portal = Starlette(routes=[Route('/account',account), Route('/account/password',password,methods=['POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])
+portal = Starlette(routes=[Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])

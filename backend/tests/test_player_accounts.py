@@ -41,6 +41,22 @@ def test_repeat_join_reuses_citizen(monkeypatch):
     assert client.post('/account/join',headers={'origin':'https://evil.test'}).status_code == 409
 
 
+def test_password_navigation_returns_to_form(monkeypatch):
+    async def unexpected_auth(*args, **kwargs):
+        raise AssertionError('Navigation must not authenticate')
+    monkeypatch.setattr(accounts, 'auth_call', unexpected_auth)
+    client = TestClient(accounts.portal, base_url='https://testserver')
+    for method in ('GET', 'HEAD'):
+        response = client.request(method, '/account/password', follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers['location'] == '/account'
+        assert 'set-cookie' not in response.headers
+    response = client.get('/account/password')
+    assert response.status_code == 200
+    assert response.url.path == '/account'
+    assert 'Continue with Google' in response.text
+
+
 def test_google_pkce_and_password_verification(monkeypatch):
     joins = []
     monkeypatch.setattr(accounts, 'ensure_citizen', lambda uid, name: joins.append((uid,name)))
