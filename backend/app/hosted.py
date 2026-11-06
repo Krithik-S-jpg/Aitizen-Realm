@@ -72,6 +72,8 @@ class HostedBackend:
             return await RedirectResponse("/account", status_code=303)(scope, receive, send)
         if scope["type"] == "http" and path == "/admin/login" and method == "GET":
             from app.auth_design import realm_page, ADMIN_FORM
+            if cookie or bearer:
+                return await RedirectResponse('/admin/world', status_code=303)(scope, receive, send)
             return await realm_page(ADMIN_FORM)(scope, receive, send)
         if scope["type"] == "http" and path == "/login" and method == "POST":
             if not same_origin:
@@ -109,6 +111,9 @@ class HostedBackend:
             response = RedirectResponse("/account", status_code=303)
             response.delete_cookie("__Host-aitizen", secure=True, httponly=True, samesite="strict")
             return await response(scope, receive, send)
+        if scope["type"] == "http" and path == "/admin/world" and method in ("GET", "POST"):
+            from app.shared_world_admin import shared_world_page
+            return await shared_world_page(scope, receive, send)
         if scope["type"] == "http" and path == "/" and method == "GET":
             if (WEB_BUILD / "index.html").is_file():
                 return await RedirectResponse("/game/", status_code=303)(scope, receive, send)

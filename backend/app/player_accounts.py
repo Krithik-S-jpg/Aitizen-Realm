@@ -83,6 +83,11 @@ async def finish_login(tokens):
     if not user.get('email_confirmed_at'):
         raise ValueError('Confirm your email before signing in.')
     name = str(user.get('user_metadata', {}).get('display_name') or user.get('user_metadata', {}).get('full_name') or 'Citizen')[:80]
+    try:
+        ensure_citizen(uid, name)
+    except (ValueError, LookupError):
+        # Login is still possible while the admin is preparing a world.
+        pass
     response = RedirectResponse('/account', status_code=303)
     response.set_cookie(COOKIE, seal({'uid':uid,'name':name,'exp':int(time.time())+3600}), max_age=3600, secure=True, httponly=True, samesite='strict')
     response.delete_cookie('__Host-oauth', secure=True, httponly=True, samesite='lax')
@@ -104,17 +109,36 @@ def linked_citizen(uid):
     return service, world, entity
 
 
+def ensure_citizen(uid, name):
+    """Single-worker atomic join; existing/deceased identities are never replaced."""
+    service, world, entity = linked_citizen(uid)
+    if entity is not None:
+        if entity.active:
+            entity.tags.add('autonomous')
+        return entity
+    if not world.shared_world.accepting_players:
+        raise ValueError('The administrator has not opened this world to new players yet.')
+    from app.domain.models.entity import EntityKind
+    entity = service.create(EntityKind.AGENT, name, world.width//2, world.height//2,
+                            tags={'autonomous'}, auto_spawn=True)
+    entity.metadata.update({'account_user_id':uid, 'ai_mode':'utility'})
+    return entity
+
+
 async def account(request):
     user = identity(request)
     if not user:
         return page(PLAYER_FORM)
     content = '<h1>Welcome, '+html.escape(user['name'])+'</h1>'
     try:
-        _, _, entity = linked_citizen(user['uid'])
+        _, world, entity = linked_citizen(user['uid'])
+        content += '<p>World: '+html.escape(world.shared_world.name)+'</p>'
         if entity:
             content += '<p>Your citizen: '+html.escape(entity.name)+'</p><p>Status: '+('Active' if entity.active else 'Inactive')+'</p>'
-        else:
+        elif world.shared_world.accepting_players:
             content += '<form method="post" action="/account/join"><button>Join the shared world</button></form>'
+        else:
+            content += '<p>The administrator is preparing the shared world. New joins are currently closed.</p>'
     except ValueError as error:
         content += '<p>'+html.escape(str(error))+'</p>'
     content += '<p>Player world controls are not enabled yet. Your administrator controls the simulation.</p><form method="post" action="/account/logout"><button>Sign out</button></form>'
@@ -164,11 +188,7 @@ async def join(request):
         if not user:
             return RedirectResponse('/account', status_code=303)
         # No awaits between lookup and creation: single-worker idempotent join.
-        service, world, entity = linked_citizen(user['uid'])
-        if entity is None:
-            from app.domain.models.entity import EntityKind
-            entity = service.create(EntityKind.AGENT, user['name'], world.width//2, world.height//2, auto_spawn=True)
-            entity.metadata['account_user_id'] = user['uid']
+        ensure_citizen(user['uid'], user['name'])
         return RedirectResponse('/account', status_code=303)
     except ValueError as error:
         return page('<p>'+html.escape(str(error))+'</p><a href="/account">Back</a>', 409)

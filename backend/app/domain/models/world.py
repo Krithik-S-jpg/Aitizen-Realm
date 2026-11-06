@@ -214,12 +214,20 @@ class Chunk(BaseModel):
         return chunk
 
 
+class SharedWorldSettings(BaseModel):
+    """Explicit administrator designation, persisted with the world."""
+
+    name: str = Field(default="Shared realm", min_length=1, max_length=80)
+    accepting_players: bool = False
+
+
 class World(BaseModel):
     """Represents the complete simulation map holding chunks of tiles."""
 
     width: int = Field(default=0, ge=0, description="World width in tiles")
     height: int = Field(default=0, ge=0, description="World height in tiles")
     seed: int | None = Field(default=None, description="Procedural generation seed")
+    shared_world: SharedWorldSettings = Field(default_factory=SharedWorldSettings)
     marine_initialized: bool = False
     caves_initialized: bool = False
     expeditions: dict[str, dict[str, Any]] = Field(default_factory=dict)

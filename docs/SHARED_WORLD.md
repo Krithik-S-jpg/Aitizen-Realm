@@ -1,0 +1,12 @@
+# Shared player world
+
+1. Sign in as owner and create or load your intended world in the game.
+2. Open `/admin/world` on the same backend host. The administrator link on the player sign-in page also takes an already signed-in owner there.
+3. Name the current world and choose **Set this world and open player joins**.
+4. Players sign in at `/account` using email or Google. A verified sign-in creates one autonomous Utility AI citizen named from that account's display name. Accounts signed in before opening can use **Join the shared world**.
+5. Repeated sign-ins reuse the account's citizen. Inactive/deceased citizens are not automatically replaced. Closing new joins leaves existing citizens intact.
+6. Pause and save a checkpoint after designation and after new citizens join. Load that checkpoint after a backend restart. Settings and account links travel in the world payload. This feature does not add automatic cloud recovery; unsaved joins can be lost on a free-host restart.
+
+New worlds and older saves default to closed joins. Changing the loaded world changes the shared world: this deployment runs one world, not separate player worlds. Run exactly one backend worker for atomic account joins.
+
+Player sessions remain restricted to the account portal; this does not grant player access to the admin Godot client. Citizens use existing Utility AI. Local Ollama integration is a separate feature.
