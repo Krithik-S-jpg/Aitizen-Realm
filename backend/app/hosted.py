@@ -75,7 +75,8 @@ class HostedBackend:
             return await realm_page(ADMIN_FORM)(scope, receive, send)
         if scope["type"] == "http" and path == "/login" and method == "POST":
             if not same_origin:
-                return await JSONResponse({"detail":"Origin rejected"}, status_code=403)(scope, receive, send)
+                from app.auth_design import realm_page
+                return await realm_page('<h1>Refresh your sign-in page</h1><p>This request could not be verified. Open a fresh sign-in page and try again.</p><a class="google" href="/admin/login">Return to administrator sign-in</a><a class="admin-link" href="/account">Player sign-in</a>', 403)(scope, receive, send)
             body = b""
             while True:
                 message = await receive()

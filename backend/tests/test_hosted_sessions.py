@@ -34,6 +34,12 @@ def test_sessions():
     assert 'name="key"' not in landing.text
     assert 'name="key"' in client.get('/admin/login').text
     assert 'prefers-reduced-motion' in landing.text
+    # Native form POSTs can send Origin:null under no-referrer. Keep the
+    # initiating page's policy compatible with strict Origin validation.
+    assert landing.headers['referrer-policy'] == 'strict-origin-when-cross-origin'
+    assert client.get('/admin/login').headers['referrer-policy'] == 'strict-origin-when-cross-origin'
+    assert client.post('/login', data={'key':TOKEN}, headers={'Origin':'null'}).status_code == 403
+    assert client.post('/login', data={'key':TOKEN}, headers={'Origin':'https://evil.example'}).status_code == 403
     assert '/auth-assets/realm-v2.png' in landing.text
     assert client.head('/auth-assets/realm-v2.png').status_code == 200
     assert client.get('/auth-assets/not-public').status_code == 401
