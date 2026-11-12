@@ -29,6 +29,7 @@ func _ready() -> void:
 	if websocket_url.is_empty():
 		websocket_url = RuntimeConfig.websocket_url("/api/v1/simulation/ws")
 	_request = HTTPRequest.new()
+	_request.timeout = 20.0
 	add_child(_request)
 	_request.request_completed.connect(_on_request_completed)
 	connect_websocket()
@@ -36,6 +37,8 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	if RuntimeConfig.is_player():
+		return
 	_socket.poll()
 	var socket_state := _socket.get_ready_state()
 	if socket_state == WebSocketPeer.STATE_OPEN:
@@ -50,6 +53,8 @@ func _process(_delta: float) -> void:
 
 
 func connect_websocket() -> void:
+	if RuntimeConfig.is_player():
+		return
 	if _socket.get_ready_state() != WebSocketPeer.STATE_CLOSED:
 		return
 	var error := _socket.connect_to_url(websocket_url)
@@ -88,6 +93,9 @@ func reset_environment() -> void:
 
 
 func _send_request(path: String, method: HTTPClient.Method, body: String = "") -> void:
+	if RuntimeConfig.is_player():
+		if method != HTTPClient.METHOD_GET or path != "/state":
+			return
 	if _request_in_flight:
 		# Keep the latest user command instead of surfacing a harmless race as an error.
 		if method != HTTPClient.METHOD_GET:
@@ -97,7 +105,7 @@ func _send_request(path: String, method: HTTPClient.Method, body: String = "") -
 		return
 	_requested_path = path
 	var headers := PackedStringArray(["Content-Type: application/json"]) if not body.is_empty() else PackedStringArray()
-	var error := _request.request(simulation_url + path, headers, method, body)
+	var error := _request.request(simulation_url if RuntimeConfig.is_player() else simulation_url + path, headers, method, body)
 	if error != OK:
 		request_failed.emit("Could not send simulation request (error %d)." % error)
 		return

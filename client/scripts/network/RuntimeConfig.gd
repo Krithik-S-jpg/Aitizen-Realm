@@ -6,8 +6,15 @@ const DEFAULT_HTTP_BASE := "http://127.0.0.1:8000"
 
 static var _cached: Dictionary = {}
 
+static func is_player() -> bool:
+	return OS.has_feature("web") and bool(JavaScriptBridge.eval("window.AITIZEN_PLAYER === true", true))
+
 
 static func http_url(path: String) -> String:
+	if is_player():
+		var routes := {"/api/v1/world": "world", "/api/v1/entities": "entities", "/api/v1/simulation": "state"}
+		if routes.has(path):
+			path = "/account/game-data/" + str(routes[path])
 	return str(_config().get("http_base_url", DEFAULT_HTTP_BASE)).trim_suffix("/") + path
 
 

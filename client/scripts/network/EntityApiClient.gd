@@ -29,7 +29,7 @@ func _ready() -> void:
 
 
 func fetch_overview() -> void:
-	_send(entities_url + "/admin/overview", HTTPClient.METHOD_GET, "overview")
+	_send(entities_url if RuntimeConfig.is_player() else entities_url + "/admin/overview", HTTPClient.METHOD_GET, "overview")
 
 func start_dive(entity_id: String) -> void:
 	_send(entities_url + "/" + entity_id + "/dive", HTTPClient.METHOD_POST, "dive", "{}")

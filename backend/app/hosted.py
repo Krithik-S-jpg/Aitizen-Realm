@@ -1,7 +1,7 @@
 """Protected backend-only deployment entry point.
 
-The public health probe reveals no simulation data. All other HTTP and
-WebSocket requests require the owner token; missing configuration fails closed.
+The public health probe reveals no simulation data. Player sessions use scoped
+read-only views; owner APIs and WebSockets require owner authentication.
 """
 
 import os
@@ -98,6 +98,18 @@ class HostedBackend:
         if cookie and not bearer and (scope["type"] == "websocket" or method not in ("GET", "HEAD", "OPTIONS")) and not same_origin:
             cookie = False
         if not bearer and not cookie:
+            # Player sessions may read static game files, never owner APIs.
+            if scope['type'] == 'http' and method in ('GET', 'HEAD') and (path == '/game' or path.startswith('/game/')):
+                from starlette.requests import Request
+                from app.player_accounts import identity
+                if identity(Request(scope)):
+                    if path in ('/game', '/game/', '/game/index.html'):
+                        if not (WEB_BUILD / 'index.html').is_file():
+                            return await JSONResponse({'detail': 'Browser game is not deployed yet'}, 503)(scope, receive, send)
+                        markup = (WEB_BUILD / 'index.html').read_text(encoding='utf-8')
+                        markup = markup.replace('<head>', '<head><script>window.AITIZEN_PLAYER = true;</script><base href="/game/">', 1)
+                        return await HTMLResponse(markup, headers={'Cache-Control': 'no-store'})(scope, receive, send)
+                    return await self.wrapped(scope, receive, send)
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})
                 return

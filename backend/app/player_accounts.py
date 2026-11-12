@@ -212,5 +212,6 @@ async def logout(request):
 
 
 from app.player_dashboard import view, chat
+from app.player_game import data as game_data
 
-portal = Starlette(routes=[Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])
+portal = Starlette(routes=[Route('/account/game-data/{section}',game_data), Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])

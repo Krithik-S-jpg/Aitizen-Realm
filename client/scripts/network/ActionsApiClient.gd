@@ -22,6 +22,8 @@ func _ready() -> void:
 
 
 func fetch_blueprints() -> void:
+	if RuntimeConfig.is_player():
+		return
 	if _request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
 		return
 	var error: int = _request.request(actions_url + "/blueprints")

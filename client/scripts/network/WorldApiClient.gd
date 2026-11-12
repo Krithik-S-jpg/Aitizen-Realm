@@ -112,7 +112,8 @@ func fetch_resources() -> void:
 	if _request_in_flight:
 		return
 	_request_kind = "resources"
-	var err := _http_request.request(backend_url + "/live")
+	var live_url := backend_url.trim_suffix("world") + "live" if RuntimeConfig.is_player() else backend_url + "/live"
+	var err := _http_request.request(live_url)
 	if err != OK:
 		_handle_failure("Failed to refresh live resources (Error %d)" % err)
 		return

@@ -36,13 +36,17 @@ var _depth_controls: HBoxContainer
 var _depth_world_page := true
 var _depth_focus_mode := false
 var _world_editor: PanelContainer
+var _player_status: Label
+var _player_needs: Label
+var _player_refresh_count := 0
 
 func _ready() -> void:
 	# Browser exports cannot rely on the operating system's symbol fonts.
 	ThemeDB.fallback_font = preload("res://assets/fonts/InterfaceFont.tres")
 	if OS.has_feature("web"):
 		world_scene.set_visual_quality("balanced")
-	add_child(preload("res://scripts/network/ObserverCapture.gd").new())
+	if not RuntimeConfig.is_player():
+		add_child(preload("res://scripts/network/ObserverCapture.gd").new())
 	_world_editor = preload("res://scripts/ui/WorldEditor.gd").new()
 	_world_editor.renderer = world_scene.renderer
 	hud.add_child(_world_editor)
@@ -164,7 +168,64 @@ func _ready() -> void:
 	event_overlay.navigate_requested.connect(_focus_camera_at)
 
 	# Initial request on start
+	if RuntimeConfig.is_player():
+		_setup_player_view()
 	_on_reload_requested()
+
+func _setup_player_view() -> void:
+	for child: Node in $UI.get_children():
+		if child == day_night_overlay or child == _depth_controls:
+			continue
+		child.process_mode = Node.PROCESS_MODE_DISABLED
+		if child is Control:
+			child.hide()
+	_depth_controls.position = Vector2(20, 76)
+	var layer_names := ["Surface", "Underwater", "Caves"]
+	for index: int in range(_depth_controls.get_child_count()):
+		(_depth_controls.get_child(index) as Button).text = layer_names[index]
+	var panel := PanelContainer.new()
+	panel.position = Vector2(20, 16)
+	$UI.add_child(panel)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	panel.add_child(row)
+	var account := Button.new()
+	account.text = "My citizen & chat"
+	account.pressed.connect(func() -> void: JavaScriptBridge.eval("window.location.assign('/account')"))
+	row.add_child(account)
+	var follow := Button.new()
+	follow.text = "Follow my citizen"
+	follow.pressed.connect(func() -> void: _follow_player = true)
+	row.add_child(follow)
+	_player_status = Label.new()
+	_player_status.text = "Connecting..."
+	row.add_child(_player_status)
+	_player_needs = Label.new()
+	var needs_panel := PanelContainer.new()
+	needs_panel.position = Vector2(20, 120)
+	$UI.add_child(needs_panel)
+	var needs_margin := MarginContainer.new()
+	for edge: String in ["left", "right", "top", "bottom"]:
+		needs_margin.add_theme_constant_override("margin_" + edge, 12)
+	needs_panel.add_child(needs_margin)
+	needs_margin.add_child(_player_needs)
+	var timer := Timer.new()
+	timer.wait_time = 2.0
+	timer.autostart = true
+	timer.timeout.connect(func() -> void:
+		_player_refresh_count += 1
+		simulation_client.fetch_state()
+		entity_client.fetch_overview()
+		if _parsed_world.is_empty() or _player_refresh_count % 15 == 0:
+			api_client.fetch_world()
+		else:
+			api_client.fetch_resources())
+	add_child(timer)
+	simulation_client.request_failed.connect(func(_message: String) -> void: _player_status.text = "Reconnecting... / Account to sign in")
+	entity_client.request_failed.connect(func(_message: String) -> void:
+		_player_status.text = "Waiting for world / Account to sign in"
+		_player_entity = {}
+		camera.clear_follow_target())
 
 func _update_depth_controls() -> void:
 	if not is_instance_valid(_depth_controls):
@@ -188,6 +249,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			camera.clear_follow_target()
 			hud.update_player(_player_entity, _follow_player)
 	# Click to inspect tiles
+	if RuntimeConfig.is_player():
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var global_mouse_pos: Vector2 = get_global_mouse_position()
 		var map_pos: Vector2i = world_scene.renderer.local_to_map(world_scene.renderer.to_local(global_mouse_pos))
@@ -231,6 +294,8 @@ func _process(delta: float) -> void:
 	minimap.update_camera(world_scene.renderer.local_to_map(camera.position))
 
 func _on_world_data_received(data: Dictionary) -> void:
+	if RuntimeConfig.is_player():
+		_tracked_entity_id = str(data.get("player_entity_id", ""))
 	loader.load_world_from_json(data)
 
 func _on_world_loaded(parsed_world: Dictionary) -> void:
@@ -275,6 +340,8 @@ func _on_world_loaded(parsed_world: Dictionary) -> void:
 	)
 
 func _on_connection_failed(error_message: String) -> void:
+	if is_instance_valid(_player_status):
+		_player_status.text = "Waiting for world / reconnecting..."
 	hud.update_status(false, error_message)
 
 func _on_validation_failed(error_message: String) -> void:
@@ -298,6 +365,8 @@ func _on_new_world_requested(options: Dictionary = {}) -> void:
 
 func _on_simulation_state_received(state: Dictionary) -> void:
 	var engine_state := str(state.get("state", "UNKNOWN"))
+	if is_instance_valid(_player_status):
+		_player_status.text = engine_state.capitalize() + " / View only"
 	world_scene.set_simulation_running(engine_state.to_upper() == "RUNNING")
 	var tick := int(state.get("current_tick", state.get("tick", 0)))
 	var tick_rate := float(state.get("tick_rate", 1.0))
@@ -440,6 +509,8 @@ func _request_chunks_around_camera() -> void:
 		floori(float(map_position.y) / chunk_size)
 	)
 	world_scene.renderer.set_visible_chunk_center(center_chunk)
+	if RuntimeConfig.is_player():
+		return # Read only: never trigger on-demand chunk generation.
 	for offset_x in range(-1, 2):
 		for offset_y in range(-1, 2):
 			var chunk := center_chunk + Vector2i(offset_x, offset_y)
@@ -466,6 +537,16 @@ func _on_chunk_loaded(chunk_position: Vector2i, parsed_world: Dictionary) -> voi
 
 func _update_player_entity() -> void:
 	_player_entity = {}
+	if RuntimeConfig.is_player():
+		for entity: Dictionary in _parsed_world.get("entities", []):
+			if "player" in entity.get("tags", []):
+				_player_entity = entity
+				_tracked_entity_id = str(entity.get("id", ""))
+				break
+		if is_instance_valid(_player_needs):
+			var needs: Dictionary = _player_entity.get("needs", {})
+			_player_needs.text = "%s\nHealth %d  Energy %d\nHunger %d  Thirst %d" % [str(_player_entity.get("name", "Waiting for your citizen")), int(needs.get("health", 0)), int(needs.get("energy", 0)), int(needs.get("hunger", 0)), int(needs.get("thirst", 0))]
+		return
 	if not _tracked_entity_id.is_empty():
 		for entity: Dictionary in _parsed_world.get("entities", []):
 			if str(entity.get("id", "")) == _tracked_entity_id:
