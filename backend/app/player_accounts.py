@@ -136,14 +136,15 @@ async def account(request):
         _, world, entity = linked_citizen(user['uid'])
         content += '<p>World: '+html.escape(world.shared_world.name)+'</p>'
         if entity:
-            content += '<p>Your citizen: '+html.escape(entity.name)+'</p><p>Status: '+('Active' if entity.active else 'Inactive')+'</p>'
+            from app.player_dashboard import dashboard
+            return dashboard(user, world, entity)
         elif world.shared_world.accepting_players:
             content += '<form method="post" action="/account/join"><button>Join the shared world</button></form>'
         else:
             content += '<p>The administrator is preparing the shared world. New joins are currently closed.</p>'
     except ValueError as error:
         content += '<p>'+html.escape(str(error))+'</p>'
-    content += '<p>Player world controls are not enabled yet. Your administrator controls the simulation.</p><form method="post" action="/account/logout"><button>Sign out</button></form>'
+    content += '<p>Your dashboard becomes available after you join a world.</p><form method="post" action="/account/logout"><button>Sign out</button></form>'
     return page(content)
 
 
@@ -210,4 +211,6 @@ async def logout(request):
     return response
 
 
-portal = Starlette(routes=[Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])
+from app.player_dashboard import view, chat
+
+portal = Starlette(routes=[Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])

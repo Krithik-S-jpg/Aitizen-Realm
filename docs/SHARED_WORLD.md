@@ -9,4 +9,4 @@
 
 New worlds and older saves default to closed joins. Changing the loaded world changes the shared world: this deployment runs one world, not separate player worlds. Run exactly one backend worker for atomic account joins.
 
-Player sessions remain restricted to the account portal; this does not grant player access to the admin Godot client. Citizens use existing Utility AI. Local Ollama integration is a separate feature.
+Player sessions open a responsive dashboard at `/account`: a nearby overhead terrain map follows their citizen and refreshes every five seconds, with needs bars and activity. Chat is scoped to the signed-in account and uses the existing dialogue service; replies clearly identify simulation-status fallback when Ollama is unavailable. Chat does not execute commands. This does not grant access to the admin Godot client. Citizens use existing Utility AI; hosted local-Ollama connectivity is separate work.

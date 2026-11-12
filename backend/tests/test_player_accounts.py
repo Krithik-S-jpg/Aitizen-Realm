@@ -95,7 +95,7 @@ def test_google_callback_creates_usable_player_session(monkeypatch):
     monkeypatch.setattr(accounts,'config',lambda: ('https://supabase.test','public-key','https://testserver'))
     monkeypatch.setattr(accounts,'ensure_citizen',lambda uid,name: None)
     world = SimpleNamespace(shared_world=SimpleNamespace(name='Our realm',accepting_players=True))
-    citizen = SimpleNamespace(name='Alice',active=True)
+    citizen = SimpleNamespace(name='Alice',active=True,metadata={})
     monkeypatch.setattr(accounts,'linked_citizen',lambda uid: (None,world,citizen))
     calls = []
     async def fake_auth(path, body=None, token=None):
