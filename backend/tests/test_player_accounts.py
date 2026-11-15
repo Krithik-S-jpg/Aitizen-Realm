@@ -94,8 +94,8 @@ def test_closed_world_and_inactive_citizen(monkeypatch):
 def test_google_callback_creates_usable_player_session(monkeypatch):
     monkeypatch.setattr(accounts,'config',lambda: ('https://supabase.test','public-key','https://testserver'))
     monkeypatch.setattr(accounts,'ensure_citizen',lambda uid,name: None)
-    world = SimpleNamespace(shared_world=SimpleNamespace(name='Our realm',accepting_players=True), episodes={})
-    citizen = SimpleNamespace(id='alice',name='Alice',active=True,metadata={})
+    world = SimpleNamespace(shared_world=SimpleNamespace(name='Our realm',accepting_players=True), episodes={}, actions={}, active_actions={})
+    citizen = SimpleNamespace(id='alice',name='Alice',active=True,metadata={},needs=None)
     monkeypatch.setattr(accounts,'linked_citizen',lambda uid: (None,world,citizen))
     calls = []
     async def fake_auth(path, body=None, token=None):
@@ -115,9 +115,9 @@ def test_google_callback_creates_usable_player_session(monkeypatch):
     assert 'SameSite=lax' in cookie
     assert 'Secure' in cookie and 'HttpOnly' in cookie and 'Path=/' in cookie
     assert 'upstream-secret' not in cookie
-    assert 'Welcome, Alice' in client.get('/account').text
+    assert 'Welcome back, Alice' in client.get('/account').text
     assert client.post('/account/logout',headers={'origin':'https://evil.test'}).status_code == 403
-    assert 'Welcome, Alice' in client.get('/account').text
+    assert 'Welcome back, Alice' in client.get('/account').text
     assert client.post('/account/logout',headers={'origin':'https://testserver'},follow_redirects=False).status_code == 303
     assert 'Continue with Google' in client.get('/account').text
     assert calls == ['token?grant_type=pkce','user']

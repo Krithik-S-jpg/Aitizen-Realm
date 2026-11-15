@@ -131,21 +131,13 @@ async def account(request):
     user = identity(request)
     if not user:
         return page(PLAYER_FORM)
-    content = '<h1>Welcome, '+html.escape(user['name'])+'</h1>'
+    from app.player_portal_design import dashboard
     try:
         _, world, entity = linked_citizen(user['uid'])
-        content += '<p>World: '+html.escape(world.shared_world.name)+'</p>'
-        if entity:
-            from app.player_dashboard import dashboard
-            return dashboard(user, world, entity)
-        elif world.shared_world.accepting_players:
-            content += '<form method="post" action="/account/join"><button>Join the shared world</button></form>'
-        else:
-            content += '<p>The administrator is preparing the shared world. New joins are currently closed.</p>'
+        return dashboard(user, world, entity)
     except ValueError as error:
-        content += '<p>'+html.escape(str(error))+'</p>'
-    content += '<p>Your dashboard becomes available after you join a world.</p><form method="post" action="/account/logout"><button>Sign out</button></form>'
-    return page(content)
+        return dashboard(user, notice=str(error))
+
 
 
 async def password(request):
@@ -212,6 +204,7 @@ async def logout(request):
 
 
 from app.player_dashboard import view, chat
+from app.player_portal_design import arrival
 from app.player_game import data as game_data
 
-portal = Starlette(routes=[Route('/account/game-data/{section}',game_data), Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])
+portal = Starlette(routes=[Route('/account/arrival',arrival), Route('/account/game-data/{section}',game_data), Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])

@@ -39,3 +39,26 @@ def test_dashboard_scopes_map_and_chat(monkeypatch):
     assert len(other.metadata['player_chat'])==1
     own.active=False
     assert client.post('/account/chat',data={'message':'Hi'},headers={'origin':'https://testserver'}).status_code==409
+
+
+def test_dashboard_waiting_and_arrival(monkeypatch):
+    monkeypatch.setenv('HOSTED_ADMIN_TOKEN','test-only-'+'x'*40)
+    client=TestClient(accounts.portal,base_url='https://testserver')
+    assert client.get('/account/arrival',follow_redirects=False).status_code==303
+    client.cookies.set(accounts.COOKIE,accounts.seal({'uid':'owner','name':'<Player>','exp':time.time()+300}))
+    def unavailable(uid):
+        raise ValueError('The administrator must load the shared world first.')
+    monkeypatch.setattr(accounts,'linked_citizen',unavailable)
+    response=client.get('/account')
+    assert response.status_code==200
+    assert 'Shared world not set' in response.text
+    assert 'id="conversation"' in response.text
+    assert '&lt;Player&gt;' in response.text
+    assert 'href="/game/"' not in response.text
+    assert 'action="/account/join"' not in response.text
+    assert 'nonce-' in response.headers['content-security-policy']
+    scene=client.get('/account/arrival')
+    assert scene.status_code==200
+    assert 'Interactive landscape' in scene.text
+    assert 'engine.startGame' not in scene.text
+    assert '$GODOT' not in scene.text
