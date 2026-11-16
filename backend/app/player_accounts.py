@@ -134,7 +134,7 @@ async def account(request):
     from app.player_portal_design import dashboard
     try:
         _, world, entity = linked_citizen(user['uid'])
-        return dashboard(user, world, entity)
+        return dashboard(user, world, entity, notice='Character saved.' if request.query_params.get('character') == 'saved' else '')
     except ValueError as error:
         return dashboard(user, notice=str(error))
 
@@ -205,6 +205,7 @@ async def logout(request):
 
 from app.player_dashboard import view, chat
 from app.player_portal_design import arrival
+from app.player_customization import customize, portrait
 from app.player_game import data as game_data
 
-portal = Starlette(routes=[Route('/account/arrival',arrival), Route('/account/game-data/{section}',game_data), Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])
+portal = Starlette(routes=[Route('/account/customize',customize,methods=['POST']),Route('/account/portrait/{avatar}',portrait),Route('/account/arrival',arrival), Route('/account/game-data/{section}',game_data), Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])

@@ -282,7 +282,7 @@ def get_live_scene(
     }
 
 
-def _format_world(world: World) -> dict[str, Any]:
+def _format_world(world: World, *, include_entities: bool = True) -> dict[str, Any]:
     """Formats a domain world for visualization clients."""
     width = world.width or DEFAULT_WORLD_WIDTH
     height = world.height or DEFAULT_WORLD_HEIGHT
@@ -320,7 +320,7 @@ def _format_world(world: World) -> dict[str, Any]:
         "structures": [_format_structure(item) for item in world.structures.values()],
         "entities": [
             _format_entity(entity, world)
-            for entity in world.entities.values()
+            for entity in (world.entities.values() if include_entities else ())
             if entity.active
         ],
         "layer_support": {

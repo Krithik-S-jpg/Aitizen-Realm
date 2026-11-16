@@ -36,7 +36,7 @@ async def data(request):
         return JSONResponse({'detail': 'Waiting for the administrator to load your world. Return to your account if this continues.'}, 409, headers=headers)
     section = request.path_params['section']
     if section == 'world':
-        result = _format_world(world)
+        result = _format_world(world, include_entities=False)
         result['entities'] = [entity_view(e, world, own) for e in world.entities.values() if e.active or e.id == own.id]
         result['player_entity_id'] = str(own.id)
     elif section == 'entities':

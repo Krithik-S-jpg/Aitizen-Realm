@@ -136,4 +136,6 @@ class HostedBackend:
         await self.wrapped(scope, receive, send)
 
 
-app = HostedBackend(simulation_app, os.environ.get("HOSTED_ADMIN_TOKEN", ""))
+from app.transport_compression import SimulationCompression
+
+app = SimulationCompression(HostedBackend(simulation_app, os.environ.get("HOSTED_ADMIN_TOKEN", "")))
