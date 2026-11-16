@@ -1,15 +1,28 @@
-"""Compress large simulation responses, leaving authentication and HTML alone."""
-from starlette.middleware.gzip import GZipMiddleware
+"""Keep Godot HTTP responses unencoded across browser and native transports."""
 
 
-class SimulationCompression:
+class SimulationTransport:
     def __init__(self, app):
         self.app = app
-        # Level one keeps CPU cost low on the small hosted instance.
-        self.compressed = GZipMiddleware(app, minimum_size=2048, compresslevel=1)
 
     async def __call__(self, scope, receive, send):
         path = scope.get('path', '')
         if scope['type'] == 'http' and scope.get('method') == 'GET' and (path.startswith('/api/v1/world') or path.startswith('/account/game-data/')):
-            return await self.compressed(scope, receive, send)
+            # Browser fetch can decode gzip before Godot receives the body while
+            # retaining Content-Encoding. A second decode then fails in Godot.
+            # Do not gzip these endpoints; ask intermediaries not to transform
+            # them either. Preserve authentication and existing cache directives.
+            async def send_identity(message):
+                if message['type'] == 'http.response.start':
+                    headers = list(message.get('headers', []))
+                    for index, (key, value) in enumerate(headers):
+                        if key.lower() == b'cache-control':
+                            if b'no-transform' not in value.lower():
+                                headers[index] = (key, value + b', no-transform')
+                            break
+                    else:
+                        headers.append((b'cache-control', b'no-transform'))
+                    message = {**message, 'headers': headers}
+                await send(message)
+            return await self.app(scope, receive, send_identity)
         return await self.app(scope, receive, send)

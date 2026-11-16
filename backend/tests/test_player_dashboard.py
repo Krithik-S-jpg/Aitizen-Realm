@@ -91,17 +91,19 @@ def test_character_customization_is_account_scoped(monkeypatch):
     assert client.get('/account/portrait/miner').headers['content-type']=='image/png'
 
 
-def test_world_compression_preserves_payload():
-    import gzip
+def test_godot_world_transport_stays_uncompressed():
     from starlette.applications import Starlette
     from starlette.routing import Route
     from starlette.responses import JSONResponse
-    from app.transport_compression import SimulationCompression
+    from app.transport_compression import SimulationTransport
     payload={'tiles':[{'x':i,'terrain':'forest','walkable':True} for i in range(1000)]}
     async def endpoint(request):
-        return JSONResponse(payload)
-    client=TestClient(SimulationCompression(Starlette(routes=[Route('/account/game-data/world',endpoint)])))
-    response=client.get('/account/game-data/world',headers={'accept-encoding':'gzip'})
-    assert response.headers['content-encoding']=='gzip'
-    assert response.json()==payload
-    assert int(response.headers['content-length'])<len(response.content)/2
+        return JSONResponse(payload,headers={'Cache-Control':'no-store'})
+    paths=['/account/game-data/world','/api/v1/world','/account/game-data/entities']
+    client=TestClient(SimulationTransport(Starlette(routes=[Route(path,endpoint) for path in paths])))
+    for path in paths:
+        response=client.get(path,headers={'accept-encoding':'gzip, deflate, br'})
+        assert 'content-encoding' not in response.headers
+        assert response.headers['cache-control']=='no-store, no-transform'
+        assert response.json()==payload
+        assert int(response.headers['content-length'])==len(response.content)
