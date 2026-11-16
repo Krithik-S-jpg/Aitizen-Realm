@@ -1,6 +1,9 @@
 # DebugHUD.gd
 extends Control
+
 class_name DebugHUD
+
+var _focus_need_bars: Dictionary = {}
 
 ## Visualizes client-side system metrics and active connection configurations.
 
@@ -260,13 +263,16 @@ func update_player(entity: Dictionary, following: bool) -> void:
 		", ".join(carried) if not carried.is_empty() else "Empty",
 		"RELEASE" if following else "FOLLOW"
 	]
-	_agent_card_name.text = "◉  %s" % str(entity.get("name", "Aitizen"))
+	_agent_card_name.text = "%s" % str(entity.get("name", "Aitizen"))
+	for key: String in _focus_need_bars:
+		var bar: ProgressBar = _focus_need_bars[key]
+		bar.value = clampf(float(needs.get(key, 100.0)), 0.0, 100.0)
 	_agent_card_action.text = "%s  ·  %s  ·  %s" % [
 		str(entity.get("goal", "idle")).replace("_", " ").to_upper(),
 		str(entity.get("action", "idle")).replace("_", " ").to_upper(),
 		"TRACKING" if following else "FREE CAMERA"
 	]
-	_agent_card_needs.text = "♥ %.0f   ◔ %.0f   ◇ %.0f   ⚡ %.0f    PACK %s" % [
+	_agent_card_needs.text = "Health %.0f  Hunger %.0f  Thirst %.0f  Energy %.0f\nPack %s" % [
 		float(needs.get("health", 100.0)),
 		float(needs.get("hunger", 0.0)),
 		float(needs.get("thirst", 0.0)),
@@ -544,6 +550,20 @@ func _build_command_hud() -> void:
 	agent_column.add_child(_agent_card_name)
 	agent_column.add_child(_agent_card_action)
 	agent_column.add_child(_agent_card_needs)
+	var bars := HBoxContainer.new()
+	agent_column.add_child(bars)
+	for key: String in ["health", "energy"]:
+		var stack := VBoxContainer.new()
+		stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bars.add_child(stack)
+		var bar := ProgressBar.new()
+		bar.show_percentage = false
+		bar.custom_minimum_size = Vector2(80, 5)
+		bar.tooltip_text = key.capitalize()
+		bar.add_theme_stylebox_override("background", _panel_style(Color("203934"), Color.TRANSPARENT, 3))
+		bar.add_theme_stylebox_override("fill", _panel_style(Color("83bfa1") if key == "health" else Color("d2bd83"), Color.TRANSPARENT, 3))
+		stack.add_child(bar)
+		_focus_need_bars[key] = bar
 
 	_focus_button = _command_button("Hide interface", _toggle_focus_mode)
 	_focus_button.text = "⛶  WORLD FOCUS"

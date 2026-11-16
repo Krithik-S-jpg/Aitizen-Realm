@@ -67,3 +67,21 @@ async def chat(request):
         return RedirectResponse('/account',status_code=303)
     except (ValueError,HTTPException) as error:
         return document('<main><h1>Message not sent</h1><p>'+esc(getattr(error,'detail',str(error)))+'</p><a href="/account">Return to your citizen</a></main>',status=409)
+
+
+async def status(request):
+    """Cheap account-scoped availability check; no other citizen data."""
+    from starlette.responses import JSONResponse
+    from app.player_accounts import identity, linked_citizen
+    user = identity(request)
+    headers = {'Cache-Control': 'no-store'}
+    if not user:
+        return JSONResponse({'detail': 'Session expired'}, status_code=401, headers=headers)
+    try:
+        _, world, entity = linked_citizen(user['uid'])
+    except ValueError:
+        return JSONResponse({'loaded': False, 'joined': False, 'accepting': False, 'status': 'Awaiting world'}, headers=headers)
+    joined = entity is not None
+    accepting = bool(world.shared_world.accepting_players)
+    label = ('Citizen active' if entity.active else 'Citizen inactive') if joined else ('Ready to join' if accepting else 'World closed to new players')
+    return JSONResponse({'loaded': True, 'joined': joined, 'accepting': accepting, 'status': label}, headers=headers)

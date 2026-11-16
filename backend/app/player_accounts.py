@@ -203,9 +203,9 @@ async def logout(request):
     return response
 
 
-from app.player_dashboard import view, chat
+from app.player_dashboard import view, chat, status
 from app.player_portal_design import arrival
 from app.player_customization import customize, portrait
 from app.player_game import data as game_data
 
-portal = Starlette(routes=[Route('/account/customize',customize,methods=['POST']),Route('/account/portrait/{avatar}',portrait),Route('/account/arrival',arrival), Route('/account/game-data/{section}',game_data), Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])
+portal = Starlette(routes=[Route('/account/status',status),Route('/account/customize',customize,methods=['POST']),Route('/account/portrait/{avatar}',portrait),Route('/account/arrival',arrival), Route('/account/game-data/{section}',game_data), Route('/account/view',view), Route('/account/chat',chat,methods=['POST']),Route('/account',account), Route('/account/password',password,methods=['GET','POST']), Route('/account/google',google), Route('/account/callback',callback), Route('/account/join',join,methods=['POST']), Route('/account/logout',logout,methods=['POST'])])

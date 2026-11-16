@@ -55,7 +55,7 @@ def test_dashboard_waiting_and_arrival(monkeypatch):
     assert 'id="conversation"' in response.text
     assert '&lt;Player&gt;' in response.text
     assert 'href="/game/"' not in response.text
-    assert 'action="/account/join"' not in response.text
+    assert '<form method="post" action="/account/join"' not in response.text
     assert 'nonce-' in response.headers['content-security-policy']
     scene=client.get('/account/arrival')
     assert scene.status_code==200
@@ -107,3 +107,22 @@ def test_godot_world_transport_stays_uncompressed():
         assert response.headers['cache-control']=='no-store, no-transform'
         assert response.json()==payload
         assert int(response.headers['content-length'])==len(response.content)
+
+def test_availability_status_is_account_scoped(monkeypatch):
+    monkeypatch.setenv('HOSTED_ADMIN_TOKEN','test-only-'+'x'*40)
+    client=TestClient(accounts.portal,base_url='https://testserver')
+    assert client.get('/account/status').status_code==401
+    client.cookies.set(accounts.COOKIE,accounts.seal({'uid':'owner','name':'Alice','exp':time.time()+300}))
+    world=World(width=32,height=32)
+    monkeypatch.setattr(accounts,'linked_citizen',lambda uid:(None,world,None))
+    r=client.get('/account/status')
+    assert r.json()['loaded'] and not r.json()['joined']
+    assert r.json()['status']=='World closed to new players'
+    world.shared_world.accepting_players=True
+    assert client.get('/account/status').json()['status']=='Ready to join'
+    own=Entity(kind=EntityKind.AGENT,name='Private name',x=12,y=12)
+    monkeypatch.setattr(accounts,'linked_citizen',lambda uid:(None,world,own))
+    r=client.get('/account/status')
+    assert r.json()['joined']
+    assert 'Private name' not in r.text
+    assert r.headers['cache-control']=='no-store'

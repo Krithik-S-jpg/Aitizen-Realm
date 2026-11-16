@@ -115,9 +115,9 @@ def test_google_callback_creates_usable_player_session(monkeypatch):
     assert 'SameSite=lax' in cookie
     assert 'Secure' in cookie and 'HttpOnly' in cookie and 'Path=/' in cookie
     assert 'upstream-secret' not in cookie
-    assert 'Welcome back, Alice' in client.get('/account').text
+    assert '<h1>Alice</h1>' in client.get('/account').text
     assert client.post('/account/logout',headers={'origin':'https://evil.test'}).status_code == 403
-    assert 'Welcome back, Alice' in client.get('/account').text
+    assert '<h1>Alice</h1>' in client.get('/account').text
     assert client.post('/account/logout',headers={'origin':'https://testserver'},follow_redirects=False).status_code == 303
     assert 'Continue with Google' in client.get('/account').text
     assert calls == ['token?grant_type=pkce','user']
