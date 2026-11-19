@@ -4,7 +4,7 @@ from uuid import UUID
 
 from app.application.services.animal_service import AnimalService
 from app.application.services.world_generator import WorldGenerator
-from app.domain.models.calendar import DayPhase, Season
+from app.domain.models.calendar import DayPhase, Season, calendar_at_tick, get_calendar_control
 from app.domain.models.entity import Entity, EntityKind
 from app.domain.models.needs import NeedsState
 from app.domain.models.resource import ResourceNode, ResourceType
@@ -174,7 +174,9 @@ def test_diurnal_deer_sleeps_at_night() -> None:
     world.entities[str(deer.id)] = deer
     repository.save(world)
 
-    AnimalService(repository).advance_all(tick=18)
+    tick = next(t for t in range(get_calendar_control().ticks_per_day * 2)
+                if t % 3 == 0 and calendar_at_tick(t).phase == DayPhase.NIGHT)
+    AnimalService(repository).advance_all(tick=tick)
 
     assert deer.metadata["state"] == "sleep"
     assert deer.needs is not None and deer.needs.energy > 70.0

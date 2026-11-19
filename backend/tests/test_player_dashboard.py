@@ -126,3 +126,19 @@ def test_availability_status_is_account_scoped(monkeypatch):
     assert r.json()['joined']
     assert 'Private name' not in r.text
     assert r.headers['cache-control']=='no-store'
+
+def test_life_panels_show_only_own_recorded_history():
+    from app.player_life import panels
+    from app.domain.models.memory import Episode,EpisodeType
+    from app.domain.models.society import SocialBond
+    world=World(width=32,height=32)
+    own=Entity(kind=EntityKind.AGENT,name='Alice',x=12,y=12)
+    other=Entity(kind=EntityKind.AGENT,name='<Bob>',x=13,y=13)
+    world.entities={str(own.id):own,str(other.id):other}
+    world.episodes[str(own.id)]=[Episode(entity_id=own.id,episode_type=EpisodeType.DISCOVERY,tick=12,x=12,y=12,summary='<Found food>')]
+    world.episodes[str(other.id)]=[Episode(entity_id=other.id,episode_type=EpisodeType.DANGER,tick=14,x=13,y=13,summary='PRIVATE HISTORY')]
+    world.social_bonds['own']=SocialBond(source_id=own.id,target_id=other.id,trust=.5,familiarity=.4,interactions=4)
+    text=panels({'uid':'owner'},world,own)
+    assert '&lt;Found food&gt;' in text and 'PRIVATE HISTORY' not in text
+    assert '&lt;Bob&gt;' in text and 'Friend' in text
+    assert 'data-tick="12"' in text

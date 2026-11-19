@@ -37,5 +37,18 @@ func _run() -> void:
 	home.stockpile.items.wood = 0
 	renderer.update_structures([home])
 	assert(renderer._scenery_mesh.mesh != furnished, "Stockpile changes must invalidate visual piles")
+	var citizens := [{"id":"one","x":4,"y":4,"kind":"agent"},{"id":"two","x":4,"y":4,"kind":"agent"}]
+	renderer.update_entities(citizens)
+	var dynamic = renderer._dynamic_layer
+	assert(dynamic._crowd_targets.size() == 2)
+	assert(dynamic._crowd_targets.one != dynamic._crowd_targets.two)
+	dynamic._process(0.1)
+	assert(dynamic._crowd_offsets.one.length() < dynamic._crowd_targets.one.length(), "Separation must ease in")
+	assert(renderer.get_entity_visual_local("one") != renderer.get_entity_visual_local("two"))
+	citizens[1]["indoors"] = true
+	citizens[1]["sleep_home_position"] = [4,5]
+	renderer.update_entities(citizens)
+	assert(dynamic._crowd_targets.is_empty())
+	assert(dynamic._occupied_homes.has(Vector2i(4,5)))
 	print("PASS: cached scenery, layer isolation, quality controls, resource invalidation")
 	quit()

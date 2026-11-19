@@ -110,6 +110,10 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 		return batch.mesh()
 	for coordinate: Vector2i in coordinates:
 		ground(batch, coordinate, tiles, renderer._diamond_at(renderer.map_to_local(coordinate)), palette, detail)
+	var tree_cells := {}
+	for resource: Dictionary in resources:
+		if str(resource.get("type", "")) == "tree":
+			tree_cells[Vector2i(int(resource.get("x",0)),int(resource.get("y",0)))] = true
 	for resource: Dictionary in resources:
 		var kind := str(resource.get("type", ""))
 		var coordinate := Vector2i(int(resource.get("x",0)),int(resource.get("y",0)))
@@ -117,8 +121,21 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 			continue
 		var radius := 23.0 if kind == "tree" else 10.0
 		var base: Vector2 = renderer.map_to_local(coordinate) + Vector2(radius * 0.22, 4)
+		if kind == "tree":
+			var neighbors := 0
+			for offset: Vector2i in OFFSETS:
+				neighbors += int(tree_cells.has(coordinate+offset))
+			if neighbors < 3:
+				for j: int in range(3):
+					batch.draw_circle(base+Vector2(-14+j*11,5+j%2*3),3.0,Color(0.24,0.36,0.19,0.38))
+			if posmod(coordinate.x*13+coordinate.y*7,11) == 0:
+				batch.draw_line(base+Vector2(-14,5),base+Vector2(-4,2),Color("796b4e"),2)
 		batch.draw_circle(base, radius, Color(0.05,0.10,0.09,0.09))
 		batch.draw_circle(base, radius * 0.72, Color(0.05,0.10,0.09,0.12))
+	var roads := {}
+	for structure: Dictionary in structures:
+		if str(structure.get("structure_type", "")) == "road" and bool(structure.get("completed",false)):
+			roads[Vector2i(int(structure.get("x",0)),int(structure.get("y",0)))] = true
 	for structure: Dictionary in structures:
 		if not bool(structure.get("completed", false)):
 			continue
@@ -128,6 +145,17 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 		var base: Vector2 = renderer.map_to_local(at) + Vector2(0,2)
 		var kind := str(structure.get("structure_type", "")).to_lower()
 		foundation(batch,base,kind,detail)
+		if kind in ["shelter", "house", "home"]:
+			# Small ornamental border, outside the actual entrance; no invented food.
+			for j: int in range(4):
+				var edge := base + Vector2(-32+j*5, 12+j*2)
+				batch.draw_line(edge,edge+Vector2(0,-5),Color("65764b"),2)
+				batch.draw_circle(edge+Vector2(0,-5),1.7,Color("c7b880"))
+			# Only extend the worn approach toward a real neighboring road.
+			for offset: Vector2i in OFFSETS:
+				if roads.has(at+offset):
+					batch.draw_line(base+Vector2(15,14),renderer.map_to_local(at+offset),Color(0.58,0.50,0.34,0.35),8)
+					break
 		if kind in ["shelter","storage","tent","workbench"]:
 			batch.draw_circle(base + Vector2(6,4),34,Color(0.05,0.10,0.09,0.12))
 			for i: int in range(3):

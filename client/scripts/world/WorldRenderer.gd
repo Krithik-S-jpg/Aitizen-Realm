@@ -58,9 +58,15 @@ var _simulation_running := true
 var underwater_view := false
 var cave_view := false
 var _cave_texture: Texture2D
+var _ridge_texture: Texture2D = preload("res://assets/world/ridge-v1.png")
 var _water_profiles: Dictionary = {}
+var _wave_batches: Array[PackedVector2Array] = []
 var _speech_cues: Dictionary = {}
 var _night_light := false
+var _occupied_homes: Dictionary = {}
+var _crowd_offsets: Dictionary = {}
+var _crowd_targets: Dictionary = {}
+var _entity_stopping: Dictionary = {}
 var _speech_style: StyleBoxFlat
 const NaturalDetails = preload("res://scripts/world/NaturalDetails.gd")
 
@@ -108,8 +114,21 @@ func _draw_water_waves(coordinate: Vector2i, center: Vector2) -> void:
 			var x := (t - .5) * (12 + strength * 20) * (.7 + seed * .6)
 			var y := (phase - .5) * 10 + sin(t * PI) * strength * 2 + (seed - .5) * 5
 			points.append(center + Vector2(x, y) + Vector2(direction.x * (phase - .5) * 8, 0))
-		draw_polyline(points, Color(.35, .72, .87, fade * (.12 + strength * .2)), 3 + strength * 3, true)
-		draw_polyline(points, Color(.77, .94, 1, fade * (.16 + strength * .48)), 1 + strength * 1.3, true)
+		var bucket := mini(2, int(fade * 3.0))
+		if _wave_batches.size() == 3:
+			for segment: int in range(points.size()-1):
+				_wave_batches[bucket].append(points[segment])
+				_wave_batches[bucket].append(points[segment+1])
+
+func _flush_water_waves() -> void:
+	# Six batched strokes replace two draw commands per individual crest.
+	for bucket: int in range(_wave_batches.size()):
+		if _wave_batches[bucket].is_empty():
+			continue
+		var alpha := (bucket+0.5)/3.0
+		draw_multiline(_wave_batches[bucket],Color(.35,.72,.87,alpha*.20),3.5,true)
+		draw_multiline(_wave_batches[bucket],Color(.77,.94,1,alpha*.35),1.1,true)
+
 
 func set_cave_view(enabled: bool) -> void:
 	cave_view = enabled
@@ -552,6 +571,7 @@ func update_entities(entities: Array) -> void:
 			var cave_at: Array = cave_meta.get("cave_position", [0, 0])
 			target += Vector2(float(cave_at[0]), float(cave_at[1]))
 		present[key] = true
+		_entity_stopping[key] = str(entity.get("action", "idle")).to_lower() in ["idle", "sleep", "rest", "drink", "eat", "build", "craft", "fish", "cook"]
 		var previous_target: Vector2 = _entity_target_positions.get(key, target)
 		if not _entity_visual_positions.has(key) or not _simulation_running:
 			_entity_visual_positions[key] = target
@@ -584,9 +604,33 @@ func update_entities(entities: Array) -> void:
 			_entity_motion_amounts.erase(key)
 			_entity_stride_distances.erase(key)
 			_entity_facing.erase(key)
+			_crowd_offsets.erase(key)
+			_entity_stopping.erase(key)
 	if _is_dynamic_layer:
 		_ordered_entities = _entities.duplicate()
 		_ordered_entities.sort_custom(_sort_resources)
+		_occupied_homes.clear()
+		for resident: Dictionary in _ordered_entities:
+			var home: Variant = resident.get("sleep_home_position")
+			if bool(resident.get("indoors",false)) and home is Array and home.size() == 2:
+				_occupied_homes[Vector2i(int(home[0]),int(home[1]))] = true
+		_crowd_targets.clear()
+		var groups := {}
+		for entity: Dictionary in _ordered_entities:
+			if str(entity.get("kind", "agent")).to_lower() != "agent" or bool(entity.get("indoors", false)) or entity.get("carried_by") != null or entity.get("infant_carried_by") != null:
+				continue
+			var cell := Vector2i(int(entity.get("x",0)),int(entity.get("y",0)))
+			if not groups.has(cell):
+				groups[cell] = []
+			groups[cell].append(str(entity.get("id", "")))
+		for cell: Vector2i in groups:
+			var ids: Array = groups[cell]
+			ids.sort()
+			if ids.size() < 2:
+				continue
+			for i: int in range(ids.size()):
+				_crowd_targets[ids[i]] = Vector2.from_angle(i * TAU / ids.size()) * Vector2(7,3)
+
 	else:
 		_ordered_entities.clear()
 	if _is_dynamic_layer or _active_layer == "population":
@@ -628,13 +672,22 @@ func _process(delta: float) -> void:
 		var elapsed: float = minf(float(_entity_segment_elapsed.get(key, 0.0)) + delta, _movement_interval)
 		_entity_segment_elapsed[key] = elapsed
 		var progress := clampf(elapsed / maxf(_movement_interval, 0.001), 0.0, 1.0)
-		# Constant segment speed avoids braking to zero at every tile boundary.
+		# Ease the final segment only when the backend reports a stationary action.
+		if bool(_entity_stopping.get(key, false)):
+			progress = progress + progress*progress - progress*progress*progress
+		# Continuous travel keeps constant speed across intermediate tile boundaries.
 		var next := start.lerp(target, progress)
 		_entity_motion_amounts[key] = next.distance_to(current) / maxf(delta, 0.001)
 		if next.distance_squared_to(current) > 0.00001:
 			_record_visual_motion(str(key), current, next)
 			_entity_visual_positions[key] = next
 			changed = true
+	for key: Variant in _entity_visual_positions:
+		var offset: Vector2 = _crowd_offsets.get(key, Vector2.ZERO)
+		var target_offset: Vector2 = _crowd_targets.get(key, Vector2.ZERO)
+		var eased := offset.move_toward(target_offset, delta * 18.0)
+		_crowd_offsets[key] = eased
+		changed = changed or not eased.is_equal_approx(offset)
 	var has_falling_tree := _resource_fall_started_ms.values().any(func(started: Variant) -> bool:
 		return _visual_msec() - int(started) < 900
 	)
@@ -647,7 +700,7 @@ func _process(delta: float) -> void:
 func _record_visual_motion(entity_id: String, previous: Vector2, next: Vector2) -> void:
 	var displacement := _map_vector_to_local(next) - _map_vector_to_local(previous)
 	_entity_stride_distances[entity_id] = float(_entity_stride_distances.get(entity_id, 0.0)) + displacement.length()
-	if absf(displacement.x) > 0.001:
+	if absf(displacement.x) > 0.10:
 		_entity_facing[entity_id] = -1.0 if displacement.x < 0.0 else 1.0
 
 
@@ -667,7 +720,7 @@ func get_entity_visual_local(entity_id: String) -> Vector2:
 			if str(entity.get("id", "")) == entity_id:
 				map_position = Vector2(float(entity.get("x", 0)), float(entity.get("y", 0)))
 				break
-	return _map_vector_to_local(map_position)
+	return _map_vector_to_local(map_position) + Vector2(_crowd_offsets.get(entity_id, Vector2.ZERO))
 
 
 func get_entity_at(map_position: Vector2i) -> Dictionary:
@@ -768,6 +821,7 @@ func _draw() -> void:
 		_draw_underwater()
 		return
 
+	_wave_batches = [PackedVector2Array(),PackedVector2Array(),PackedVector2Array()]
 	for coordinate: Vector2i in _ordered_coordinates:
 		if _is_dynamic_layer and not _water_profiles.has(coordinate) and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
 			continue
@@ -788,6 +842,7 @@ func _draw() -> void:
 
 	if not _is_dynamic_layer:
 		return
+	_flush_water_waves()
 
 	for resource: Dictionary in _ordered_resources:
 		var resource_position := Vector2i(resource["x"], resource["y"])
@@ -851,7 +906,7 @@ func _draw() -> void:
 			elif str(entity.get("kind", "agent")).to_lower() == "animal":
 				_draw_animal(_map_vector_to_local(visual), entity)
 			else:
-				_draw_agent(_map_vector_to_local(visual), entity)
+				_draw_agent(_map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO)), entity)
 
 	_draw_highlight(_hovered_tile, HOVER_COLOR, 1.5)
 	_draw_highlight(_selected_tile, SELECTED_COLOR, 2.5)
@@ -1056,16 +1111,16 @@ func _draw_tile_details(coordinate: Vector2i, center: Vector2, terrain: String, 
 
 
 func _draw_mountain(coordinate: Vector2i, tile_center: Vector2, elevation: float) -> void:
-	if _cave_texture != null:
-		var neighbors := 0
-		for offset: Vector2i in NaturalDetails.OFFSETS:
-			if str(_tiles.get(coordinate + offset, {}).get("terrain", "")).to_lower() == "mountain":
-				neighbors += 1
-		if (posmod(coordinate.x, 2) == 0 and posmod(coordinate.y, 2) == 0) or neighbors == 0:
-			var column := 2 if elevation > 0.9 else int(_seabed_random(Vector2i(coordinate.x / 6, coordinate.y / 6), 16) * 2.0)
-			var ridge_scale := (0.76 + neighbors * 0.045 + clampf(elevation, 0.0, 1.0) * 0.18)
-			var shift := (_seabed_random(coordinate, 143) - 0.5) * 12.0
-			_water_asset(_cave_texture, column, 0, 4, 4, tile_center + Vector2(shift, -28), Vector2(160, 160) * ridge_scale)
+	# Dedicated ridge silhouettes overlap gently through a mountain region.
+	var neighbors := 0
+	for offset: Vector2i in NaturalDetails.OFFSETS:
+		if str(_tiles.get(coordinate + offset, {}).get("terrain", "")).to_lower() == "mountain":
+			neighbors += 1
+	if _ridge_texture != null:
+		if (posmod(coordinate.x, 3) == 0 and posmod(coordinate.y, 2) == 0) or neighbors == 0:
+			var variation := 0.94 + _seabed_random(coordinate, 93)*0.12
+			var height := 95.0 + clampf(elevation, 0.0, 1.0) * 30.0
+			draw_texture_rect_region(_ridge_texture, Rect2(tile_center + Vector2(-91,-height+14),Vector2(182*variation,height)),Rect2(Vector2.ZERO,_ridge_texture.get_size()))
 		return
 	var variation: int = posmod(coordinate.x * 17 + coordinate.y * 31, 11)
 	var is_major_peak: bool = variation < 5 or elevation > 0.86
@@ -1342,6 +1397,26 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 		draw_line(base + Vector2(-9, 2), base + Vector2(9, -4), Color("55483d"), 4.0)
 		return
 	if _draw_buildable_sprite(base, kind):
+		if kind in ["shelter","house","home"] and _draw_detail_level > 0 and _occupied_homes.has(Vector2i(int(structure.get("x",0)),int(structure.get("y",0)))):
+			if not _night_light and _weather != "RAIN":
+				# Occupied homes air linen during dry daylight; subtle wind only.
+				var a := base+Vector2(31,-10)
+				var b := base+Vector2(51,-2)
+				draw_line(a+Vector2(0,13),a,Color("6f6048"),1.5)
+				draw_line(b+Vector2(0,13),b,Color("6f6048"),1.5)
+				draw_line(a,b,Color("b2ab8e"),1)
+				for cloth: int in range(2):
+					var at := a.lerp(b,0.25+cloth*0.4)
+					var sway := sin(_visual_seconds*1.4+cloth)*minf(_wind_speed*0.12,1.2)
+					draw_colored_polygon(PackedVector2Array([at,at+Vector2(5,2),at+Vector2(5+sway,9),at+Vector2(sway,7)]),Color("d1c7a6") if cloth == 0 else Color("a3b5b1"))
+			if _night_light:
+				draw_circle(base + Vector2(-11,-29),8,Color(1.0,0.68,0.27,0.08))
+				draw_rect(Rect2(base+Vector2(-13,-33),Vector2(4,6)),Color(1.0,0.76,0.40,0.5))
+			if _temperature_c < 12.0:
+				for puff: int in range(3):
+					var age := fposmod(_visual_seconds * 0.15 + puff / 3.0,1.0)
+					var at := base + Vector2(4,-91) + _wind_vector()*age*12 + Vector2(0,-age*22)
+					draw_circle(at,2+age*4,Color(0.78,0.81,0.79,sin(age*PI)*0.12))
 		if kind == "campfire":
 			_draw_fire_physics(base + Vector2(0, -13), float(structure.get("fuel", 0.0)))
 		elif kind == "farm":
@@ -1533,9 +1608,9 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 	if action in ["sleep", "rest"]:
 		height *= 0.84
 	var width := height * source.size.x / maxf(source.size.y, 1.0)
-	var bob := sin(phase * 2.0) * (2.6 if action == "flee" else (1.6 if moving else 0.35))
+	var bob := sin(phase * TAU / 0.8) * (2.6 if action == "flee" else (1.2 if moving else 0.15))
 	if action in ["graze", "drink", "root", "feed"]:
-		bob = abs(sin(phase * 1.7)) * 2.2
+		bob = 0.0 # Feeding poses keep their feet planted.
 	var weather_shiver := sin(_visual_seconds * 18.0 + tile_center.x) * 0.8 if _temperature_c < 3.0 else 0.0
 	# Wind may animate foliage; grounded animals must not slide off their feet.
 	var base := tile_center + Vector2(weather_shiver, 5.0 + bob)
@@ -1555,7 +1630,7 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 		draw_string(ThemeDB.fallback_font, base + Vector2(8, -height - rise * 13), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.85, 1.0, 1.0 - rise))
 	elif action == "drink" and _draw_detail_level > 0:
 		var ripple := fposmod(phase, 1.0)
-		draw_arc(base + Vector2(10, -2), 3 + ripple * 10, 0, TAU, 16, Color(0.6, 0.88, 1.0, (1 - ripple) * 0.55), 1.0)
+		draw_arc(base + Vector2(10 * float(_entity_facing.get(entity_id, 1.0)), -2), 3 + ripple * 10, 0, TAU, 16, Color(0.6, 0.88, 1.0, (1 - ripple) * 0.55), 1.0)
 	if action in ["graze", "drink", "root", "feed", "hunt", "sleep", "ruminate", "groom", "preen"]:
 		var feedback_color := {
 			"graze": Color("7ee0a4"), "drink": Color("70c8e8"),

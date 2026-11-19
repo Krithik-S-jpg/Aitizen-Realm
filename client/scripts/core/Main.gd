@@ -30,6 +30,7 @@ var _chunk_check_elapsed: float = 0.0
 var _player_entity: Dictionary = {}
 var _follow_player := true
 var _tracked_entity_id := ""
+var _own_entity_id := ""
 var _tick_rate := 1.0
 var _last_world_event_sequence := -1
 var _depth_controls: HBoxContainer
@@ -43,6 +44,15 @@ var _last_light_phase := ""
 var _light_tween: Tween
 
 func _ready() -> void:
+	if OS.has_feature("web") and bool(JavaScriptBridge.eval("new URLSearchParams(location.search).get('renderer_benchmark') === '1'")):
+		for child: Node in get_children():
+			child.process_mode = Node.PROCESS_MODE_DISABLED
+			if child is CanvasItem or child is CanvasLayer:
+				child.visible = false
+		set_process(false)
+		set_process_unhandled_input(false)
+		add_child(preload("res://scripts/world/BrowserBenchmark.gd").new())
+		return
 	# Browser exports cannot rely on the operating system's symbol fonts.
 	ThemeDB.fallback_font = preload("res://assets/fonts/InterfaceFont.tres")
 	if OS.has_feature("web"):
@@ -197,7 +207,10 @@ func _setup_player_view() -> void:
 	row.add_child(account)
 	var follow := Button.new()
 	follow.text = "Follow my citizen"
-	follow.pressed.connect(func() -> void: _follow_player = true)
+	follow.pressed.connect(func() -> void:
+		if not _own_entity_id.is_empty():
+			_tracked_entity_id = _own_entity_id
+		_follow_player = true)
 	row.add_child(follow)
 	_player_status = Label.new()
 	_player_status.text = "Connecting..."
@@ -297,7 +310,8 @@ func _process(delta: float) -> void:
 
 func _on_world_data_received(data: Dictionary) -> void:
 	if RuntimeConfig.is_player():
-		_tracked_entity_id = str(data.get("player_entity_id", ""))
+		_own_entity_id = str(data.get("player_entity_id", ""))
+		_tracked_entity_id = _own_entity_id
 	loader.load_world_from_json(data)
 
 func _on_world_loaded(parsed_world: Dictionary) -> void:
