@@ -370,6 +370,7 @@ var _is_dynamic_layer := false
 var _dynamic_layer: WorldRenderer
 var _scenery_mesh: MeshInstance2D
 var _scenery_signature := 0
+var _structure_scenery_signature := 0
 var _terrain_mesh: MeshInstance2D
 var _terrain_mesh_dirty := true
 
@@ -494,6 +495,10 @@ func update_floods(tiles: Array) -> void:
 func update_structures(structures: Array) -> void:
 	_structures = structures if _is_dynamic_layer else structures.duplicate(true)
 	_rebuild_draw_order()
+	var signature := hash(_structures)
+	if signature != _structure_scenery_signature:
+		_structure_scenery_signature = signature
+		_rebuild_scenery()
 	if _is_dynamic_layer:
 		queue_redraw()
 	if not _is_dynamic_layer and _dynamic_layer != null:
@@ -1052,9 +1057,15 @@ func _draw_tile_details(coordinate: Vector2i, center: Vector2, terrain: String, 
 
 func _draw_mountain(coordinate: Vector2i, tile_center: Vector2, elevation: float) -> void:
 	if _cave_texture != null:
-		if posmod(coordinate.x, 2) == 0 and posmod(coordinate.y, 2) == 0:
+		var neighbors := 0
+		for offset: Vector2i in NaturalDetails.OFFSETS:
+			if str(_tiles.get(coordinate + offset, {}).get("terrain", "")).to_lower() == "mountain":
+				neighbors += 1
+		if (posmod(coordinate.x, 2) == 0 and posmod(coordinate.y, 2) == 0) or neighbors == 0:
 			var column := 2 if elevation > 0.9 else int(_seabed_random(Vector2i(coordinate.x / 6, coordinate.y / 6), 16) * 2.0)
-			_water_asset(_cave_texture, column, 0, 4, 4, tile_center + Vector2(0, -28), Vector2(160, 160) * (0.85 + clampf(elevation, 0.0, 1.0) * 0.25))
+			var ridge_scale := (0.76 + neighbors * 0.045 + clampf(elevation, 0.0, 1.0) * 0.18)
+			var shift := (_seabed_random(coordinate, 143) - 0.5) * 12.0
+			_water_asset(_cave_texture, column, 0, 4, 4, tile_center + Vector2(shift, -28), Vector2(160, 160) * ridge_scale)
 		return
 	var variation: int = posmod(coordinate.x * 17 + coordinate.y * 31, 11)
 	var is_major_peak: bool = variation < 5 or elevation > 0.86
@@ -1330,8 +1341,6 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 		draw_line(base + Vector2(-9, -4), base + Vector2(9, 2), Color("55483d"), 4.0)
 		draw_line(base + Vector2(-9, 2), base + Vector2(9, -4), Color("55483d"), 4.0)
 		return
-	NaturalDetails.foundation(self, base, kind, _draw_detail_level)
-	NaturalDetails.shadow(self, base, 34.0, _draw_detail_level)
 	if _draw_buildable_sprite(base, kind):
 		if kind == "campfire":
 			_draw_fire_physics(base + Vector2(0, -13), float(structure.get("fuel", 0.0)))
@@ -2187,7 +2196,7 @@ func _rebuild_scenery() -> void:
 		_scenery_mesh = MeshInstance2D.new()
 		_scenery_mesh.z_index = -1
 		add_child(_scenery_mesh)
-	_scenery_mesh.mesh = NaturalDetails.build(self, _ordered_coordinates, _tiles, _resources, TERRAIN_COLORS, _quality_detail_cap)
+	_scenery_mesh.mesh = NaturalDetails.build(self, _ordered_coordinates, _tiles, _resources, _structures, TERRAIN_COLORS, _quality_detail_cap)
 	_scenery_mesh.visible = not (cave_view or underwater_view)
 
 

@@ -29,5 +29,13 @@ func _run() -> void:
 	assert(renderer._scenery_mesh.mesh.get_surface_count() == 1)
 	renderer.update_resources([])
 	assert(renderer._scenery_mesh.mesh != original_mesh)
+	var home := {"id":"home","x":4,"y":5,"structure_type":"shelter","completed":true,"stockpile":{"items":{"wood":20}}}
+	renderer.update_structures([home])
+	var furnished: ArrayMesh = renderer._scenery_mesh.mesh
+	renderer.update_structures([home])
+	assert(renderer._scenery_mesh.mesh == furnished, "Unchanged buildings must reuse scenery")
+	home.stockpile.items.wood = 0
+	renderer.update_structures([home])
+	assert(renderer._scenery_mesh.mesh != furnished, "Stockpile changes must invalidate visual piles")
 	print("PASS: cached scenery, layer isolation, quality controls, resource invalidation")
 	quit()

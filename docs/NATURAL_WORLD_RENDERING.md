@@ -49,3 +49,17 @@ The Web export was rebuilt using the existing Web preset.
 This is a rendering pass, not a replacement asset collection. Dedicated continuous
 ridge artwork, rounded shoreline geometry, richer home props and species-specific
 animation refinements remain future work. Full-game browser FPS is not yet measured.
+
+## Follow-up scenery pass
+
+Added cached curved patches at convex water corners, neighbour-dependent mountain
+scale and slight deterministic ridge offsets. Building foundations, shadows and
+steps now join the scenery mesh. Decorative log stacks read actual stockpile wood
+(up to four visible logs); structure changes invalidate this cache, unchanged
+snapshots reuse it. Tests cover both cases.
+
+The same desktop stress fixture recorded 72.8 FPS, median 12.83 ms, p95 23.16 ms,
+worst 36.08 ms, and 280 draw calls in this run. The fixture has no buildings, so it
+cannot demonstrate a settlement performance gain. Run-to-run timing variation is
+substantial; do not treat the higher FPS as an isolated improvement measurement.
+Browser acceptance and dedicated replacement mountain artwork remain pending.

@@ -14,6 +14,23 @@ static func ground(canvas, coordinate: Vector2i, tiles: Dictionary, diamond: Pac
 	var center := (diamond[0] + diamond[2]) * 0.5
 	var seed := posmod(coordinate.x * 73 + coordinate.y * 37, 101)
 	var wet := terrain in WET
+	if wet:
+		for corner: int in range(4):
+			var before: Dictionary = tiles.get(coordinate + OFFSETS[posmod(corner - 1, 4)], {})
+			var after: Dictionary = tiles.get(coordinate + OFFSETS[corner], {})
+			if before.is_empty() or after.is_empty() or str(before.get("terrain", "")).to_lower() in WET or str(after.get("terrain", "")).to_lower() in WET:
+				continue
+			var tip := diamond[corner]
+			var a := tip.lerp(diamond[posmod(corner - 1, 4)], 0.40)
+			var b := tip.lerp(diamond[(corner + 1) % 4], 0.40)
+			var tint: Color = palette.get(str(after.get("terrain", "sand")).to_lower(), Color("d9bc73"))
+			tint.a = 0.35
+			var previous := a
+			for segment: int in range(1, 7):
+				var t := float(segment) / 6.0
+				var point := a * (1-t) * (1-t) + tip * 2 * t * (1-t) + b * t * t
+				canvas.draw_polygon(PackedVector2Array([tip, previous, point]), PackedColorArray([tint, Color(tint,0.1), Color(tint,0.1)]))
+				previous = point
 	for edge: int in range(4):
 		var neighbor: Dictionary = tiles.get(coordinate + OFFSETS[edge], {})
 		if neighbor.is_empty():
@@ -48,7 +65,7 @@ static func shadow(canvas: CanvasItem, base: Vector2, radius: float, detail: int
 	canvas.draw_circle(Vector2.ZERO, radius * 0.72, Color(0.05, 0.10, 0.09, 0.12))
 	canvas.draw_set_transform(Vector2.ZERO)
 
-static func foundation(canvas: CanvasItem, base: Vector2, kind: String, detail: int) -> void:
+static func foundation(canvas, base: Vector2, kind: String, detail: int) -> void:
 	if detail == 0 or kind in ["bridge", "road", "farm", "campfire", "torch"]:
 		return
 	var footprint := PackedVector2Array([base+Vector2(-37,0),base+Vector2(0,-17),base+Vector2(37,0),base+Vector2(0,19)])
@@ -66,6 +83,8 @@ class GroundBatch:
 			for k: int in [0, i, i + 1]:
 				vertices.append(Vector3(points[k].x, points[k].y, 0))
 				colors.append(tint[k] if tint.size() > 1 else tint[0])
+	func draw_colored_polygon(points: PackedVector2Array, tint: Color) -> void:
+		draw_polygon(points, PackedColorArray([tint]))
 	func draw_line(a: Vector2, b: Vector2, tint: Color, width: float) -> void:
 		var normal := (b - a).normalized().orthogonal() * width * 0.5
 		draw_polygon(PackedVector2Array([a-normal,b-normal,b+normal,a+normal]),PackedColorArray([tint]))
@@ -85,7 +104,7 @@ class GroundBatch:
 		result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		return result
 
-static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resources: Array, palette: Dictionary, detail: int) -> ArrayMesh:
+static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resources: Array, structures: Array, palette: Dictionary, detail: int) -> ArrayMesh:
 	var batch := GroundBatch.new()
 	if detail == 0:
 		return batch.mesh()
@@ -100,4 +119,22 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 		var base: Vector2 = renderer.map_to_local(coordinate) + Vector2(radius * 0.22, 4)
 		batch.draw_circle(base, radius, Color(0.05,0.10,0.09,0.09))
 		batch.draw_circle(base, radius * 0.72, Color(0.05,0.10,0.09,0.12))
+	for structure: Dictionary in structures:
+		if not bool(structure.get("completed", false)):
+			continue
+		var at := Vector2i(int(structure.get("x",0)),int(structure.get("y",0)))
+		if not renderer._is_coordinate_visible(at):
+			continue
+		var base: Vector2 = renderer.map_to_local(at) + Vector2(0,2)
+		var kind := str(structure.get("structure_type", "")).to_lower()
+		foundation(batch,base,kind,detail)
+		if kind in ["shelter","storage","tent","workbench"]:
+			batch.draw_circle(base + Vector2(6,4),34,Color(0.05,0.10,0.09,0.12))
+			for i: int in range(3):
+				batch.draw_line(base+Vector2(8+i*5,11+i*2),base+Vector2(13+i*5,9+i*2),Color(0.52,0.50,0.42,0.55),2)
+			var stock: Dictionary = structure.get("stockpile", {}) if structure.get("stockpile") is Dictionary else {}
+			var items: Dictionary = stock.get("items", {}) if stock.get("items") is Dictionary else {}
+			for i: int in range(mini(4,int(float(items.get("wood",0))/5))):
+				var log_at := base+Vector2(-32,4-i*3)
+				batch.draw_line(log_at,log_at+Vector2(12,-5),Color("806047"),3)
 	return batch.mesh()
