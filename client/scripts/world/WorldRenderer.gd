@@ -12,11 +12,11 @@ class_name WorldRenderer
 @export var visible_chunk_radius: int = 2
 
 const TERRAIN_COLORS: Dictionary = {
-	"grass": Color("57b96c"),
+	"grass": Color("6d9d63"),
 	"dirt": Color("ae7950"),
 	"stone": Color("89969b"),
 	"water": Color("4ba2d2"),
-	"forest": Color("328d55"),
+	"forest": Color("4b8054"),
 	"sand": Color("d9bc73"),
 	"ocean": Color("2879ad"),
 	"mountain": Color("65747b"),
@@ -25,7 +25,7 @@ const TERRAIN_COLORS: Dictionary = {
 	"wetland": Color("398b68"),
 	"snow": Color("e8f0ed"),
 	"ice": Color("8fd8e8"),
-	"meadow": Color("63c96b"),
+	"meadow": Color("7da76a"),
 	"swamp": Color("396f5d"),
 	"savanna": Color("c7a34e"),
 	"volcanic": Color("443f43")
@@ -60,7 +60,9 @@ var cave_view := false
 var _cave_texture: Texture2D
 var _water_profiles: Dictionary = {}
 var _speech_cues: Dictionary = {}
+var _night_light := false
 var _speech_style: StyleBoxFlat
+const NaturalDetails = preload("res://scripts/world/NaturalDetails.gd")
 
 func _cache_water_profiles() -> void:
 	_water_profiles.clear()
@@ -101,26 +103,20 @@ func _draw_water_waves(coordinate: Vector2i, center: Vector2) -> void:
 		var fade := sin(phase * PI)
 		var points := PackedVector2Array()
 		var direction := _wind_vector()
-		for sample in range(9):
-			var t := float(sample) / 8.0
+		for sample in range(5):
+			var t := float(sample) / 4.0
 			var x := (t - .5) * (12 + strength * 20) * (.7 + seed * .6)
 			var y := (phase - .5) * 10 + sin(t * PI) * strength * 2 + (seed - .5) * 5
 			points.append(center + Vector2(x, y) + Vector2(direction.x * (phase - .5) * 8, 0))
 		draw_polyline(points, Color(.35, .72, .87, fade * (.12 + strength * .2)), 3 + strength * 3, true)
 		draw_polyline(points, Color(.77, .94, 1, fade * (.16 + strength * .48)), 1 + strength * 1.3, true)
-	# A thin wash moves towards each land edge and fades before reaching it.
-	var diamond := _diamond_at(center)
-	for edge: int in profile.edges:
-		var phase := fposmod(_visual_seconds * speed + seed, 1)
-		var inset := (1 - phase) * (.06 + strength * .16)
-		var a := diamond[edge].lerp(center, inset + .025)
-		var b := diamond[(edge + 1) % 4].lerp(center, inset + .025)
-		draw_line(a, b, Color(.8, .96, 1, sin(phase * PI) * (.15 + strength * .4)), 1 + strength, true)
 
 func set_cave_view(enabled: bool) -> void:
 	cave_view = enabled
 	if enabled:
 		underwater_view = false
+	if _scenery_mesh != null:
+		_scenery_mesh.visible = not (cave_view or underwater_view)
 	if _terrain_mesh != null:
 		_terrain_mesh.visible = not (enabled or underwater_view)
 	if _dynamic_layer != null:
@@ -195,6 +191,8 @@ var _diving_actions_texture: Texture2D
 func set_underwater_view(enabled: bool) -> void:
 	cave_view = false
 	underwater_view = enabled
+	if _scenery_mesh != null:
+		_scenery_mesh.visible = not (cave_view or underwater_view)
 	if _terrain_mesh != null:
 		_terrain_mesh.visible = not enabled
 	if _dynamic_layer != null:
@@ -370,6 +368,8 @@ var _wind_direction := 0.0
 var _temperature_c := 18.0
 var _is_dynamic_layer := false
 var _dynamic_layer: WorldRenderer
+var _scenery_mesh: MeshInstance2D
+var _scenery_signature := 0
 var _terrain_mesh: MeshInstance2D
 var _terrain_mesh_dirty := true
 
@@ -390,6 +390,7 @@ func _ready() -> void:
 
 
 func configure_environment(calendar: Dictionary) -> void:
+	_night_light = str(calendar.get("phase", "DAY")) in ["NIGHT", "DUSK"]
 	_weather = str(calendar.get("weather", "CLEAR")).to_upper()
 	_weather_intensity = clampf(float(calendar.get("weather_intensity", 0.0)), 0.0, 1.0)
 	_wind_speed = maxf(float(calendar.get("wind_speed", 0.0)), 0.0)
@@ -411,6 +412,7 @@ func set_simulation_tick_rate(ticks_per_second: float) -> void:
 
 func set_visual_quality(quality: String) -> void:
 	_quality_detail_cap = {"performance": 0, "balanced": 1, "high": 2}.get(quality.to_lower(), 2)
+	_rebuild_scenery()
 	queue_redraw()
 	if not _is_dynamic_layer and _dynamic_layer != null:
 		_dynamic_layer.set_visual_quality(quality)
@@ -433,7 +435,7 @@ func _wind_angle(seed_position: Vector2, flexibility: float = 1.0) -> float:
 	var direction_sign := signf(_wind_vector().x)
 	if is_zero_approx(direction_sign):
 		direction_sign = 1.0
-	return _gust(seed_position, flexibility) * 0.055 * direction_sign
+	return _gust(seed_position, flexibility) * 0.022 * direction_sign if _quality_detail_cap > 0 else 0.0
 
 
 func render_world(
@@ -509,6 +511,10 @@ func update_resources(resources: Array) -> void:
 			_resource_fall_started_ms.erase(key)
 	_refresh_resource_positions()
 	_rebuild_draw_order()
+	var signature := hash(_resources.map(func(r: Dictionary) -> Array: return [r.get("x"), r.get("y"), r.get("type"), r.get("visual_state")]))
+	if signature != _scenery_signature:
+		_scenery_signature = signature
+		_rebuild_scenery()
 	if _is_dynamic_layer or _active_layer == "resources":
 		queue_redraw()
 	if not _is_dynamic_layer and _dynamic_layer != null:
@@ -866,15 +872,13 @@ func _draw_tile(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) ->
 
 	if not used_atlas_tile:
 		draw_colored_polygon(diamond, color)
-	if terrain in ["water", "ocean"]:
-		_draw_shoreline(coordinate, diamond)
 	_draw_layer_overlay(coordinate, diamond, tile_data)
 	if bool(tile_data.get("metadata", {}).get("flooded", false)):
 		draw_colored_polygon(diamond, Color(0.15, 0.47, 0.65, 0.65))
 		draw_line(center - Vector2(10, 0), center + Vector2(10, 0), Color("86c6d9"), 1.5)
 	if _draw_detail_level > 1 and terrain not in ["grass", "forest", "water", "ocean", "wetland", "swamp", "ice", "savanna"] and (not used_atlas_tile or terrain in ["meadow", "volcanic"]):
 		_draw_tile_details(coordinate, center, terrain, variant)
-	if _draw_detail_level > 0 and terrain == "mountain" and posmod(coordinate.x * 19 + coordinate.y * 23, 10) < 7:
+	if _draw_detail_level > 0 and terrain == "mountain":
 		_draw_mountain(coordinate, center, float(tile_data.get("metadata", {}).get("elevation", 0.8)))
 	if not tile_data.get("metadata", {}).get("cave", {}).is_empty():
 		_water_asset(_cave_texture, 0, 1, 4, 4, center + Vector2(0, -25), Vector2(135, 135))
@@ -900,7 +904,7 @@ func _draw_shoreline(coordinate: Vector2i, diamond: PackedVector2Array) -> void:
 
 
 func _draw_dynamic_tile_effects(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) -> void:
-	if _water_profiles.has(coordinate):
+	if _draw_detail_level > 0 and _water_profiles.has(coordinate) and posmod(coordinate.x * 13 + coordinate.y * 7, 3) == 0:
 		_draw_water_waves(coordinate, center)
 	var terrain := str(tile_data.get("terrain", "grass")).to_lower()
 	var variant: int = int(tile_data.get("metadata", {}).get("variant", 0))
@@ -1050,7 +1054,7 @@ func _draw_mountain(coordinate: Vector2i, tile_center: Vector2, elevation: float
 	if _cave_texture != null:
 		if posmod(coordinate.x, 2) == 0 and posmod(coordinate.y, 2) == 0:
 			var column := 2 if elevation > 0.9 else int(_seabed_random(Vector2i(coordinate.x / 6, coordinate.y / 6), 16) * 2.0)
-			_water_asset(_cave_texture, column, 0, 4, 4, tile_center + Vector2(0, -42), Vector2(220, 220))
+			_water_asset(_cave_texture, column, 0, 4, 4, tile_center + Vector2(0, -28), Vector2(160, 160) * (0.85 + clampf(elevation, 0.0, 1.0) * 0.25))
 		return
 	var variation: int = posmod(coordinate.x * 17 + coordinate.y * 31, 11)
 	var is_major_peak: bool = variation < 5 or elevation > 0.86
@@ -1326,6 +1330,8 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 		draw_line(base + Vector2(-9, -4), base + Vector2(9, 2), Color("55483d"), 4.0)
 		draw_line(base + Vector2(-9, 2), base + Vector2(9, -4), Color("55483d"), 4.0)
 		return
+	NaturalDetails.foundation(self, base, kind, _draw_detail_level)
+	NaturalDetails.shadow(self, base, 34.0, _draw_detail_level)
 	if _draw_buildable_sprite(base, kind):
 		if kind == "campfire":
 			_draw_fire_physics(base + Vector2(0, -13), float(structure.get("fuel", 0.0)))
@@ -1428,6 +1434,9 @@ func _draw_crop_motion(base: Vector2, structure: Dictionary) -> void:
 func _draw_fire_physics(origin: Vector2, fuel: float) -> void:
 	if fuel <= 0.0:
 		return
+	if _night_light and _draw_detail_level > 0:
+		for ring: int in range(3):
+			draw_circle(origin + Vector2(0, 10), 24.0 - ring * 6.0, Color(1.0, 0.57, 0.19, 0.025))
 	var gust := _gust(origin, 1.8)
 	var push := _wind_vector() * (3.0 + _wind_speed * 0.32) * gust
 	var flicker := 1.0 + sin(_visual_seconds * 13.0 + origin.x * 0.03) * 0.18
@@ -1509,8 +1518,8 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 		return
 	var source := animal_frame_region(values, str(species_animations.get("atlas", "primary")))
 	var height := {
-		"rabbit": 38.0, "duck": 36.0, "fox": 44.0, "goat": 50.0,
-		"boar": 49.0, "wolf": 52.0, "deer": 61.0, "bear": 66.0
+		"rabbit": 22.0, "duck": 23.0, "fox": 34.0, "goat": 46.0,
+		"boar": 43.0, "wolf": 44.0, "deer": 61.0, "bear": 68.0
 	}.get(species, 48.0) as float
 	if action in ["sleep", "rest"]:
 		height *= 0.84
@@ -1888,7 +1897,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 				float(expansion_values[2]), float(expansion_values[3])
 			)
 			var expansion_height := {
-				"ore": 44.0, "clay": 39.0, "cactus": 54.0, "herb": 37.0
+				"ore": 34.0, "clay": 24.0, "cactus": 54.0, "herb": 22.0
 			}.get(resource_type, 42.0) as float
 			var expansion_width := expansion_height * expansion_source.size.x / maxf(expansion_source.size.y, 1.0)
 			draw_texture_rect_region(
@@ -1907,7 +1916,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 			var produce := float(resource.get("produce_quantity", 0.0))
 			var variant := int(resource.get("variant", 0))
 			var visual_state := str(resource.get("visual_state", "standing"))
-			height = 82.0 + growth * 20.0
+			height = (82.0 + growth * 20.0) * (0.88 + _seabed_random(Vector2i(int(resource.get("x", 0)), int(resource.get("y", 0))), 121) * 0.24)
 			if visual_state == "stump":
 				sprite_key = "stump"
 				height = 44.0
@@ -1930,7 +1939,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 			sprite_key = "bush_fruit" if float(resource.get("produce_quantity", 0.0)) > 0.5 else "bush"
 			height = 38.0
 		"plant", "mushroom", "log", "stump":
-			height = 38.0 if resource_type in ["plant", "mushroom"] else 44.0
+			height = (18.0 if resource_type == "mushroom" else 25.0) if resource_type in ["plant", "mushroom"] else 34.0
 		_:
 			return false
 	if not _resource_sprite_regions.has(sprite_key):
@@ -2099,8 +2108,10 @@ func _rebuild_terrain_mesh() -> void:
 		var data: Dictionary = _tiles[coordinate]
 		var terrain := str(data.get("terrain", "grass")).to_lower()
 		var ground: Color = TERRAIN_COLORS.get(terrain, FALLBACK_COLOR)
+		if terrain in ["water", "ocean"]:
+			ground = ground.darkened(float(_water_profiles.get(coordinate, {}).get("exposure", 0.0)) * 0.14)
 		ground = ground.lightened(sin(coordinate.x * 0.19 + coordinate.y * 0.13) * 0.025)
-		ground.a = 0.18
+		ground.a = 0.12
 		if terrain in ["snow", "tundra", "ice", "water", "ocean", "wetland", "swamp"]:
 			ground.a = 0.06
 		elif terrain in ["stone", "mountain"]:
@@ -2113,7 +2124,7 @@ func _rebuild_terrain_mesh() -> void:
 		var shift := posmod(coordinate.x * 17 + coordinate.y * 31 + int(data.get("metadata", {}).get("variant", 0)), 4)
 		for index: int in range(4):
 			vertices.append(Vector3(diamond[index].x, diamond[index].y, 0))
-			colors.append(ground)
+			colors.append(_blended_ground_color(coordinate, index))
 			uvs.append((Vector2(float(region[0]), float(region[1])) + surface[(index + shift) % 4]) / _environment_atlas.get_size() if ground.a > 0 else Vector2.ZERO)
 		for index: int in [0, 1, 2, 0, 2, 3]:
 			indices.append(vertex_start + index)
@@ -2126,6 +2137,7 @@ func _rebuild_terrain_mesh() -> void:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	_terrain_mesh.mesh = mesh
+	_rebuild_scenery()
 
 
 func _is_on_screen(local_position: Vector2, margin: float) -> bool:
@@ -2166,3 +2178,33 @@ func _is_coordinate_visible(coordinate: Vector2i) -> bool:
 		abs(coordinate_chunk.x - _visible_chunk_center.x) <= visible_chunk_radius
 		and abs(coordinate_chunk.y - _visible_chunk_center.y) <= visible_chunk_radius
 	)
+
+
+func _rebuild_scenery() -> void:
+	if _is_dynamic_layer or _tiles.is_empty():
+		return
+	if _scenery_mesh == null:
+		_scenery_mesh = MeshInstance2D.new()
+		_scenery_mesh.z_index = -1
+		add_child(_scenery_mesh)
+	_scenery_mesh.mesh = NaturalDetails.build(self, _ordered_coordinates, _tiles, _resources, TERRAIN_COLORS, _quality_detail_cap)
+	_scenery_mesh.visible = not (cave_view or underwater_view)
+
+
+func _blended_ground_color(coordinate: Vector2i, corner: int) -> Color:
+	# All tiles touching a vertex use the same average: edges share a color.
+	var offsets: Array = [[Vector2i.ZERO, Vector2i(-1,0), Vector2i(0,-1), Vector2i(-1,-1)], [Vector2i.ZERO,Vector2i(1,0),Vector2i(0,-1),Vector2i(1,-1)], [Vector2i.ZERO,Vector2i(1,0),Vector2i(0,1),Vector2i(1,1)], [Vector2i.ZERO,Vector2i(-1,0),Vector2i(0,1),Vector2i(-1,1)]][corner]
+	var total := Color(0,0,0,0)
+	var count := 0.0
+	for offset: Vector2i in offsets:
+		var at := coordinate + offset
+		if not _tiles.has(at):
+			continue
+		var terrain := str(_tiles[at].get("terrain","grass")).to_lower()
+		var tint: Color = TERRAIN_COLORS.get(terrain,FALLBACK_COLOR)
+		if terrain in ["water","ocean"]:
+			tint = tint.darkened(float(_water_profiles.get(at,{}).get("exposure",0.0)) * 0.14)
+		tint.a = 0.06 if terrain in ["water","ocean","snow","ice"] else 0.12
+		total += tint
+		count += 1.0
+	return total / maxf(count,1.0)

@@ -39,6 +39,8 @@ var _world_editor: PanelContainer
 var _player_status: Label
 var _player_needs: Label
 var _player_refresh_count := 0
+var _last_light_phase := ""
+var _light_tween: Tween
 
 func _ready() -> void:
 	# Browser exports cannot rely on the operating system's symbol fonts.
@@ -478,15 +480,15 @@ func _apply_calendar(calendar: Dictionary) -> void:
 			int(_parsed_world["width"]),
 			int(_parsed_world["height"])
 		)
-	match str(calendar.get("phase", "DAY")):
-		"NIGHT":
-			day_night_overlay.color = Color(0.04, 0.08, 0.22, 0.48)
-		"DAWN":
-			day_night_overlay.color = Color(1.0, 0.55, 0.28, 0.14)
-		"DUSK":
-			day_night_overlay.color = Color(0.35, 0.12, 0.32, 0.25)
-		_:
-			day_night_overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	var phase := str(calendar.get("phase", "DAY"))
+	if phase != _last_light_phase:
+		_last_light_phase = phase
+		var tint: Color = {"NIGHT": Color(0.04, 0.08, 0.22, 0.42), "DAWN": Color(1.0, 0.61, 0.32, 0.12), "DUSK": Color(0.52, 0.23, 0.18, 0.20)}.get(phase, Color(0, 0, 0, 0))
+		if _light_tween != null and _light_tween.is_valid():
+			_light_tween.kill()
+		_light_tween = create_tween()
+		_light_tween.tween_property(day_night_overlay, "color", tint, 0.0 if preload("res://scripts/ui/AtlasTheme.gd").reduced_motion else 1.5)
+
 
 
 func _register_initial_chunks() -> void:
