@@ -113,6 +113,9 @@ func _add_blueprint_card(blueprint_name: String, blueprint: Dictionary) -> Panel
 		texture.atlas = load("res://assets/pixel_art/aitizen_realm_atlas_v1_clean.png") as Texture2D
 		texture.region = world_regions[blueprint_name]
 		icon.texture = texture
+	var cohesive_icon := preload("res://scripts/world/CohesiveArt.gd").icon(blueprint_name)
+	if cohesive_icon != null:
+		icon.texture = cohesive_icon
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE

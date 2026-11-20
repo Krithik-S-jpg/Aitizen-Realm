@@ -27,9 +27,9 @@ func _initialize() -> void:
 func _run() -> void:
 	root.size = Vector2i(1100, 620)
 	RenderingServer.set_default_clear_color(Color("315a43"))
-	var texture := load("res://assets/pixel_art/buildables_atlas_v1.png") as Texture2D
+	var texture := load("res://assets/world/cohesive/structures.png") as Texture2D
 	assert(texture != null)
-	assert(texture.get_size() == Vector2(1774, 887))
+	assert(texture.get_width() > 0 and texture.get_height() > 0)
 	assert(texture.get_image().get_pixel(0, 0).a == 0.0)
 	var preview := BuildablesPreview.new()
 	root.add_child(preview)

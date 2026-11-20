@@ -68,6 +68,8 @@ var _crowd_offsets: Dictionary = {}
 var _crowd_targets: Dictionary = {}
 var _entity_stopping: Dictionary = {}
 var _speech_style: StyleBoxFlat
+const CohesiveArt = preload("res://scripts/world/CohesiveArt.gd")
+var _resource_atlas: Texture2D
 const NaturalDetails = preload("res://scripts/world/NaturalDetails.gd")
 
 func _cache_water_profiles() -> void:
@@ -902,7 +904,7 @@ func _draw() -> void:
 			var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity_position))
 			if bool(entity.get("metadata", {}).get("vessel", false)):
 				var anchored := bool(entity.get("metadata", {}).get("anchored", true))
-				_water_asset(_marine_texture, 0 if anchored else int(_visual_seconds * 6) % 4, 0, 4, 4, _map_vector_to_local(visual), Vector2(110, 80))
+				_draw_buildable_sprite(_map_vector_to_local(visual) + Vector2(0, sin(_visual_seconds*1.5)* (0.4 if anchored else 1.2)), "boat")
 			elif str(entity.get("kind", "agent")).to_lower() == "animal":
 				_draw_animal(_map_vector_to_local(visual), entity)
 			else:
@@ -1369,6 +1371,8 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 	var funded: bool = bool(structure.get("funded", true))
 	var base := tile_center + Vector2(0, 2)
 	var kind := str(structure.get("structure_type", "shelter")).to_lower()
+	if kind == "bridge" and completed and _draw_buildable_sprite(base,kind):
+		return
 	if kind == "bridge":
 		var length := 7 if completed else maxi(1, int(progress * 7))
 		for plank: int in range(length):
@@ -1410,12 +1414,12 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 					var sway := sin(_visual_seconds*1.4+cloth)*minf(_wind_speed*0.12,1.2)
 					draw_colored_polygon(PackedVector2Array([at,at+Vector2(5,2),at+Vector2(5+sway,9),at+Vector2(sway,7)]),Color("d1c7a6") if cloth == 0 else Color("a3b5b1"))
 			if _night_light:
-				draw_circle(base + Vector2(-11,-29),8,Color(1.0,0.68,0.27,0.08))
-				draw_rect(Rect2(base+Vector2(-13,-33),Vector2(4,6)),Color(1.0,0.76,0.40,0.5))
+				draw_circle(base + Vector2(-34,-54),8,Color(1.0,0.68,0.27,0.08))
+				draw_rect(Rect2(base+Vector2(-36,-58),Vector2(5,7)),Color(1.0,0.76,0.40,0.5))
 			if _temperature_c < 12.0:
 				for puff: int in range(3):
 					var age := fposmod(_visual_seconds * 0.15 + puff / 3.0,1.0)
-					var at := base + Vector2(4,-91) + _wind_vector()*age*12 + Vector2(0,-age*22)
+					var at := base + Vector2(31,-130) + _wind_vector()*age*12 + Vector2(0,-age*22)
 					draw_circle(at,2+age*4,Color(0.78,0.81,0.79,sin(age*PI)*0.12))
 		if kind == "campfire":
 			_draw_fire_physics(base + Vector2(0, -13), float(structure.get("fuel", 0.0)))
@@ -1484,22 +1488,13 @@ func _draw_buildable_sprite(base: Vector2, kind: String, modulate := Color.WHITE
 
 
 func _buildable_region(kind: String) -> Rect2:
-	var indexes := {
-		"shelter": 0, "house": 0, "home": 0, "tent": 1,
-		"storage": 2, "campfire": 3, "workbench": 4,
-		"well": 5, "farm": 6, "fence": 7
-	}
-	if _buildables_atlas == null or not indexes.has(kind):
-		return Rect2()
-	var index: int = int(indexes[kind])
-	var cell := Vector2(_buildables_atlas.get_size()) / Vector2(4, 2)
-	return Rect2(Vector2(index % 4, index / 4) * cell, cell)
+	return CohesiveArt.region("structures", "shelter" if kind in ["house","home"] else kind)
 
 
 func _buildable_destination(base: Vector2, kind: String, source: Rect2) -> Rect2:
 	var height: float = {
-		"shelter": 104.0, "house": 104.0, "home": 104.0,
-		"tent": 82.0, "storage": 88.0, "campfire": 48.0,
+		"shelter": 140.0, "house": 140.0, "home": 140.0,
+		"tent": 106.0, "storage": 110.0, "campfire": 48.0,
 		"workbench": 65.0, "well": 84.0, "farm": 62.0, "fence": 54.0
 	}.get(kind, 82.0) as float
 	var width := height * source.size.x / maxf(source.size.y, 1.0)
@@ -1775,7 +1770,7 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 		draw_arc(Vector2(0, -5), 24 + sin(phase * 5) * 3, 0, PI, 20, Color("a8dfe6"), 2)
 	elif travel_mode == "boat":
 		if not bool(entity.get("metadata", {}).get("aboard", false)):
-			_water_asset(_marine_texture, int(_visual_seconds * 6) % 4, 0, 4, 4, Vector2(0, -7), Vector2(130, 95))
+			_draw_buildable_sprite(Vector2(0,8), "boat")
 		draw_arc(Vector2(0, 8), 38, 0.1, PI - 0.1, 20, Color(0.7, 0.9, 1, 0.6), 1.5)
 	if action == "move" and not carrying_wood and travel_mode == "walk":
 		_draw_carried_material(entity)
@@ -1846,12 +1841,9 @@ func _draw_carried_material(entity: Dictionary) -> void:
 			draw_line(start, start + Vector2(20, 5), Color("845333"), 4)
 			draw_circle(start + Vector2(20, 5), 2, Color("cfa873"))
 	elif float(items.get("stone", 0)) > 0:
-		if _environment_atlas != null:
-			draw_texture_rect_region(_environment_atlas, Rect2(-17, -32, 19, 20), Rect2(13, 483, 122, 128))
+		draw_texture_rect_region(CohesiveArt.texture("items"),Rect2(-17,-32,19,20),CohesiveArt.region("items","stone"))
 	elif float(items.get("food", 0)) + float(items.get("fruit", 0)) >= 3:
-		# Small snacks remain in the backpack; a real load uses the painted basket.
-		var basket := preload("res://assets/pixel_art/aitizen_realm_atlas_v1_clean.png")
-		draw_texture_rect_region(basket, Rect2(-17, -33, 24, 24), Rect2(179, 687, 121, 111))
+		draw_texture_rect_region(CohesiveArt.texture("items"),Rect2(-17,-33,24,24),CohesiveArt.region("items","fruit"))
 
 
 func work_effect_origin(entity: Dictionary) -> Variant:
@@ -1958,10 +1950,11 @@ func _load_sprite_atlas_config() -> void:
 	var config: Dictionary = parsed
 	_sprite_atlas = load(str(config.get("texture", ""))) as Texture2D
 	_citizen_roster = load("res://assets/pixel_art/citizen_roster_v1.png") as Texture2D
-	_buildables_atlas = load("res://assets/pixel_art/buildables_atlas_v1.png") as Texture2D
+	_buildables_atlas = CohesiveArt.texture("structures")
+	_resource_atlas = CohesiveArt.texture("resources")
 	_agent_sprite_regions = config.get("agent_animations", {})
 	_environment_atlas = load(str(config.get("environment_texture", ""))) as Texture2D
-	_resource_sprite_regions = config.get("resource_sprites", {})
+	_resource_sprite_regions = CohesiveArt.regions("resources")
 	_terrain_sprite_regions = config.get("terrain_sprites", {})
 	_expansion_atlas = load(str(config.get("expansion_texture", ""))) as Texture2D
 	_wildlife_atlas = load(str(config.get("wildlife_texture", ""))) as Texture2D
@@ -1973,7 +1966,7 @@ func _load_sprite_atlas_config() -> void:
 
 func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 	var resource_type := str(resource.get("type", "")).to_lower()
-	if _expansion_atlas != null and _expansion_resource_regions.has(resource_type):
+	if _expansion_atlas != null and _expansion_resource_regions.has(resource_type) and resource_type not in ["ore","clay"]:
 		var expansion_values: Array = _expansion_resource_regions[resource_type]
 		if expansion_values.size() == 4:
 			var expansion_source := Rect2(
@@ -1990,7 +1983,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 				expansion_source
 			)
 			return true
-	if _environment_atlas == null or _resource_sprite_regions.is_empty():
+	if _resource_atlas == null or _resource_sprite_regions.is_empty():
 		return false
 	var sprite_key := resource_type
 	var height := 42.0
@@ -2000,7 +1993,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 			var produce := float(resource.get("produce_quantity", 0.0))
 			var variant := int(resource.get("variant", 0))
 			var visual_state := str(resource.get("visual_state", "standing"))
-			height = (82.0 + growth * 20.0) * (0.88 + _seabed_random(Vector2i(int(resource.get("x", 0)), int(resource.get("y", 0))), 121) * 0.24)
+			height = (95.0 + growth * 48.0) * (0.88 + _seabed_random(Vector2i(int(resource.get("x", 0)), int(resource.get("y", 0))), 121) * 0.24)
 			if visual_state == "stump":
 				sprite_key = "stump"
 				height = 44.0
@@ -2022,6 +2015,8 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		"bush":
 			sprite_key = "bush_fruit" if float(resource.get("produce_quantity", 0.0)) > 0.5 else "bush"
 			height = 38.0
+		"ore", "clay":
+			height = 34.0 if resource_type == "ore" else 24.0
 		"plant", "mushroom", "log", "stump":
 			height = (18.0 if resource_type == "mushroom" else 25.0) if resource_type in ["plant", "mushroom"] else 34.0
 		_:
@@ -2050,7 +2045,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		var eased := 1.0 - pow(1.0 - fall_progress, 3.0)
 		draw_set_transform(tile_center + Vector2(0, 7), eased * 1.42, Vector2.ONE)
 		draw_texture_rect_region(
-			_environment_atlas,
+			_resource_atlas,
 			Rect2(Vector2(-width * 0.5, -height), Vector2(width, height)),
 			source
 		)
@@ -2064,7 +2059,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		var sway := _wind_angle(tile_center, 1.25) + impact_shake
 		draw_set_transform(tile_center + Vector2(0, 7), sway, Vector2.ONE)
 		draw_texture_rect_region(
-			_environment_atlas,
+			_resource_atlas,
 			Rect2(Vector2(-width * 0.5, -height), Vector2(width, height)),
 			source
 		)
@@ -2082,13 +2077,13 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		var flexibility := 2.8 if resource_type in ["plant", "reeds", "herb"] else 1.6
 		draw_set_transform(tile_center + Vector2(0, 7), _wind_angle(tile_center, flexibility), Vector2.ONE)
 		draw_texture_rect_region(
-			_environment_atlas,
+			_resource_atlas,
 			Rect2(Vector2(-width * 0.5, -height), Vector2(width, height)),
 			source
 		)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return true
-	draw_texture_rect_region(_environment_atlas, destination, source)
+	draw_texture_rect_region(_resource_atlas, destination, source)
 	return true
 
 

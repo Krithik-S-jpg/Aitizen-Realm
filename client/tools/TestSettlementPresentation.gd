@@ -18,7 +18,7 @@ func _run() -> void:
 	var atlas := load("res://assets/pixel_art/citizen_roster_v1.png") as Texture2D
 	var pixels := atlas.get_image()
 	assert(pixels.get_pixel(0, 0).a == 0.0, "Citizen atlas must have genuine alpha")
-	var buildables := load("res://assets/pixel_art/buildables_atlas_v1.png") as Texture2D
+	var buildables := load("res://assets/world/cohesive/structures.png") as Texture2D
 	assert(buildables != null)
 	assert(buildables.get_image().get_pixel(0, 0).a == 0.0, "Buildables atlas must have genuine alpha")
 	var seen: Dictionary = {}
