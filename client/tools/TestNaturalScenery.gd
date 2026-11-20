@@ -12,6 +12,21 @@ func _run() -> void:
 	assert(renderer._sort_ground_objects(behind, roof), "Citizen behind a house must render before its roof")
 	assert(renderer._sort_ground_objects(roof, front), "Foreground trees must occlude buildings")
 	assert(not renderer._sort_ground_objects(front, roof))
+	for x: int in range(16):
+		for y: int in range(16):
+			renderer._tiles[Vector2i(x,y)] = {"terrain":"mountain"}
+	renderer._cache_mountain_profiles()
+	assert(renderer._mountain_profiles.size() == 4, "One range per terrain patch, not per tile")
+	for size: Vector2 in renderer._mountain_profiles.values():
+		assert(is_equal_approx(size.x / size.y, float(renderer._ridge_texture.get_width()) / renderer._ridge_texture.get_height()), "Keep ridge proportions")
+		assert(size.y > 200, "A full range should stand above mature trees")
+	renderer._tiles.clear()
+	for x: int in range(5, 13):
+		for y: int in range(5, 13):
+			renderer._tiles[Vector2i(x,y)] = {"terrain":"mountain"}
+	renderer._cache_mountain_profiles()
+	assert(renderer._mountain_profiles.size() == 1, "A small connected range must survive grid boundaries intact")
+	renderer._tiles.clear()
 	var tiles := {}
 	for x: int in range(8):
 		for y: int in range(8):

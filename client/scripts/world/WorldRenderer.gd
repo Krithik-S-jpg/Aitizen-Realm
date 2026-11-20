@@ -59,6 +59,7 @@ var underwater_view := false
 var cave_view := false
 var _cave_texture: Texture2D
 var _ridge_texture: Texture2D = preload("res://assets/world/ridge-v1.png")
+var _mountain_profiles: Dictionary = {}
 var _water_profiles: Dictionary = {}
 var _wave_batches: Array[PackedVector2Array] = []
 var _speech_cues: Dictionary = {}
@@ -828,7 +829,7 @@ func _draw() -> void:
 		if _is_dynamic_layer and not _water_profiles.has(coordinate) and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
 			continue
 		var tile_position := map_to_local(coordinate)
-		if not _is_on_screen(tile_position, 100.0):
+		if not _is_on_screen(tile_position, 400.0 if _mountain_profiles.has(coordinate) else 100.0):
 			continue
 		if _is_dynamic_layer:
 			# Scatter ambient details across patches instead of issuing identical
@@ -1135,17 +1136,69 @@ func _draw_tile_details(coordinate: Vector2i, center: Vector2, terrain: String, 
 				draw_polyline(PackedVector2Array([center + Vector2(-10, -1), center + Vector2(-2, 2), center + Vector2(4, -3), center + Vector2(11, 1)]), Color(0.82, 0.97, 1.0, 0.75), 1.1)
 
 
+func _cache_mountain_profiles() -> void:
+	_mountain_profiles.clear()
+	var patches: Dictionary = {}
+	var remaining: Dictionary = {}
+	for coordinate: Vector2i in _tiles:
+		if str(_tiles[coordinate].get("terrain", "")).to_lower() == "mountain":
+			remaining[coordinate] = true
+	# Keep small connected ranges intact instead of splitting them into tiny
+	# duplicate mountains when they happen to straddle a grid boundary.
+	var seeds: Array = remaining.keys()
+	seeds.sort_custom(_sort_coordinates)
+	for seed: Vector2i in seeds:
+		if not remaining.has(seed):
+			continue
+		var component: Array[Vector2i] = [seed]
+		remaining.erase(seed)
+		var cursor := 0
+		while cursor < component.size():
+			var point := component[cursor]
+			cursor += 1
+			for offset: Vector2i in NaturalDetails.OFFSETS:
+				var adjacent := point + offset
+				if remaining.has(adjacent):
+					remaining.erase(adjacent)
+					component.append(adjacent)
+		if component.size() <= 144:
+			patches[seed] = component
+		else:
+			for point: Vector2i in component:
+				var patch := Vector2i(floori(float(point.x) / 8.0), floori(float(point.y) / 8.0))
+				# String keys keep regional grid blocks separate from component keys.
+				var key := "%d:%d" % [patch.x, patch.y]
+				if not patches.has(key):
+					patches[key] = []
+				patches[key].append(point)
+	for patch: Variant in patches:
+		var points: Array = patches[patch]
+		var center := Vector2.ZERO
+		for point: Vector2i in points:
+			center += Vector2(point)
+		center /= float(points.size())
+		var anchor: Vector2i = points[0]
+		var best := INF
+		for point: Vector2i in points:
+			var score := Vector2(point).distance_squared_to(center)
+			if score < best or (is_equal_approx(score, best) and _sort_coordinates(point, anchor)):
+				anchor = point
+				best = score
+		var coverage := clampf(float(points.size()) / 48.0, 0.0, 1.0)
+		# Preserve the source aspect ratio; the former fixed rectangle stretched
+		# the range vertically. Broad ranges stand above nearby mature trees.
+		var width := lerpf(180.0, 640.0, sqrt(coverage))
+		var size := Vector2(width, width * _ridge_texture.get_height() / _ridge_texture.get_width())
+		_mountain_profiles[anchor] = size
+
+
 func _draw_mountain(coordinate: Vector2i, tile_center: Vector2, elevation: float) -> void:
-	# Dedicated ridge silhouettes overlap gently through a mountain region.
-	var neighbors := 0
-	for offset: Vector2i in NaturalDetails.OFFSETS:
-		if str(_tiles.get(coordinate + offset, {}).get("terrain", "")).to_lower() == "mountain":
-			neighbors += 1
+	# A whole ridge represents a terrain patch, never a single tile.
 	if _ridge_texture != null:
-		if (posmod(coordinate.x, 5) == 0 and posmod(coordinate.y + int(coordinate.x / 5), 4) == 0) or neighbors == 0:
-			var variation := 0.94 + _seabed_random(coordinate, 93)*0.12
-			var height := 125.0 + clampf(elevation, 0.0, 1.0) * 55.0
-			draw_texture_rect_region(_ridge_texture, Rect2(tile_center + Vector2(-112*variation,-height+14),Vector2(224*variation,height)),Rect2(Vector2.ZERO,_ridge_texture.get_size()))
+		if not _mountain_profiles.has(coordinate):
+			return
+		var size: Vector2 = _mountain_profiles[coordinate]
+		draw_texture_rect(_ridge_texture, Rect2(tile_center + Vector2(-size.x * 0.5, -size.y + 14), size), false)
 		return
 	var variation: int = posmod(coordinate.x * 17 + coordinate.y * 31, 11)
 	var is_major_peak: bool = variation < 5 or elevation > 0.86
@@ -2162,6 +2215,8 @@ func _refresh_resource_positions() -> void:
 
 
 func _rebuild_draw_order() -> void:
+	if not _is_dynamic_layer:
+		_cache_mountain_profiles()
 	_ordered_coordinates.clear()
 	for coordinate: Vector2i in _tiles:
 		if _is_coordinate_visible(coordinate):
