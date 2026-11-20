@@ -6,6 +6,12 @@ func _initialize() -> void:
 func _run() -> void:
 	var renderer := WorldRenderer.new()
 	root.add_child(renderer)
+	var behind := {"base": Vector2(0, 10), "data": {"id": "citizen"}}
+	var roof := {"base": Vector2(0, 20), "data": {"id": "home"}}
+	var front := {"base": Vector2(0, 30), "data": {"id": "tree"}}
+	assert(renderer._sort_ground_objects(behind, roof), "Citizen behind a house must render before its roof")
+	assert(renderer._sort_ground_objects(roof, front), "Foreground trees must occlude buildings")
+	assert(not renderer._sort_ground_objects(front, roof))
 	var tiles := {}
 	for x: int in range(8):
 		for y: int in range(8):

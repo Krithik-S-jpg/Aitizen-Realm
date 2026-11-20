@@ -846,72 +846,95 @@ func _draw() -> void:
 		return
 	_flush_water_waves()
 
+	# Sort all upright objects together by their ground contact point.
+	var objects: Array[Dictionary] = []
 	for resource: Dictionary in _ordered_resources:
-		var resource_position := Vector2i(resource["x"], resource["y"])
-		var resource_local := map_to_local(resource_position)
-		if not _is_on_screen(resource_local, 150.0):
-			continue
-		var resource_type := str(resource["type"]).to_lower()
-		if _draw_detail_level == 0 and resource_type in ["plant", "mushroom", "reeds", "lily", "herb"]:
-			continue
-		if _draw_resource_sprite(resource_local, resource):
-			continue
-		match resource_type:
-			"tree":
-				var produce_capacity: float = float(resource.get("produce_capacity", 0.0))
-				var produce_ratio: float = (
-					float(resource.get("produce_quantity", 0.0)) / produce_capacity
-					if produce_capacity > 0.0 else 0.0
-				)
-				_draw_tree(
-					resource_local,
-					float(resource.get("growth", 1.0)),
-					int(resource.get("variant", 0)),
-					produce_ratio
-				)
-			"stone":
-				_draw_stone(resource_local, float(resource.get("capacity", 100.0)), int(resource.get("variant", 0)))
-			"plant":
-				_draw_plant(resource_local, float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
-			"bush":
-				_draw_bush(resource_local, float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
-			"mushroom":
-				_draw_mushrooms(resource_local, int(resource.get("variant", 0)))
-			"log":
-				_draw_log(resource_local)
-			"stump":
-				_draw_stump(resource_local)
-			"reeds":
-				_draw_reeds(resource_local)
-			"lily":
-				_draw_lily(resource_local, int(resource.get("variant", 0)))
-			"carcass":
-				_draw_carcass(resource_local, float(resource.get("quantity", 0)), str(resource.get("visual_state", "fresh")))
-
+		objects.append({"kind": "resource", "data": resource, "base": map_to_local(Vector2i(resource.x, resource.y))})
 	for structure: Dictionary in _ordered_structures:
-		var structure_position := Vector2i(int(structure["x"]), int(structure["y"]))
-		var structure_local := map_to_local(structure_position)
-		if _is_on_screen(structure_local, 150.0):
-			_draw_structure(structure_local, structure)
-
+		objects.append({"kind": "structure", "data": structure, "base": map_to_local(Vector2i(structure.x, structure.y))})
 	for entity: Dictionary in _ordered_entities:
-		if bool(entity.get("metadata", {}).get("marine", false)) or entity.get("metadata", {}).get("in_cave", false) or entity.get("metadata", {}).get("cave_animal", false):
+		var key := str(entity.get("id", "%s,%s" % [entity.x, entity.y]))
+		var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity.x, entity.y))
+		objects.append({"kind": "entity", "data": entity, "base": _map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO))})
+	objects = objects.filter(func(item: Dictionary) -> bool: return _is_on_screen(item.base, 180.0))
+	objects.sort_custom(_sort_ground_objects)
+	for object: Dictionary in objects:
+		if not _is_on_screen(object.base, 180.0):
 			continue
-		var entity_position := Vector2i(int(entity["x"]), int(entity["y"]))
-		var entity_local := map_to_local(entity_position)
-		if _is_coordinate_visible(entity_position) and _is_on_screen(entity_local, 150.0):
-			var key := str(entity.get("id", "%s,%s" % [entity["x"], entity["y"]]))
-			var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity_position))
-			if bool(entity.get("metadata", {}).get("vessel", false)):
-				var anchored := bool(entity.get("metadata", {}).get("anchored", true))
-				_draw_buildable_sprite(_map_vector_to_local(visual) + Vector2(0, sin(_visual_seconds*1.5)* (0.4 if anchored else 1.2)), "boat")
-			elif str(entity.get("kind", "agent")).to_lower() == "animal":
-				_draw_animal(_map_vector_to_local(visual), entity)
-			else:
-				_draw_agent(_map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO)), entity)
+		match object.kind:
+			"resource": _draw_depth_resource(object.data)
+			"structure": _draw_structure(object.base, object.data)
+			"entity": _draw_depth_entity(object.data)
 
 	_draw_highlight(_hovered_tile, HOVER_COLOR, 1.5)
 	_draw_highlight(_selected_tile, SELECTED_COLOR, 2.5)
+
+
+func _sort_ground_objects(a: Dictionary, b: Dictionary) -> bool:
+	if not is_equal_approx(a.base.y, b.base.y):
+		return a.base.y < b.base.y
+	if not is_equal_approx(a.base.x, b.base.x):
+		return a.base.x < b.base.x
+	return str(a.data.get("id", "")) < str(b.data.get("id", ""))
+
+
+func _draw_depth_resource(resource: Dictionary) -> void:
+	var resource_position := Vector2i(resource["x"], resource["y"])
+	var resource_local := map_to_local(resource_position)
+	if not _is_on_screen(resource_local, 150.0):
+		return
+	var resource_type := str(resource["type"]).to_lower()
+	if _draw_detail_level == 0 and resource_type in ["plant", "mushroom", "reeds", "lily", "herb"]:
+		return
+	if _draw_resource_sprite(resource_local, resource):
+		return
+	match resource_type:
+		"tree":
+			var produce_capacity: float = float(resource.get("produce_capacity", 0.0))
+			var produce_ratio: float = (
+				float(resource.get("produce_quantity", 0.0)) / produce_capacity
+				if produce_capacity > 0.0 else 0.0
+			)
+			_draw_tree(
+				resource_local,
+				float(resource.get("growth", 1.0)),
+				int(resource.get("variant", 0)),
+				produce_ratio
+			)
+		"stone":
+			_draw_stone(resource_local, float(resource.get("capacity", 100.0)), int(resource.get("variant", 0)))
+		"plant":
+			_draw_plant(resource_local, float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
+		"bush":
+			_draw_bush(resource_local, float(resource.get("growth", 1.0)), int(resource.get("variant", 0)))
+		"mushroom":
+			_draw_mushrooms(resource_local, int(resource.get("variant", 0)))
+		"log":
+			_draw_log(resource_local)
+		"stump":
+			_draw_stump(resource_local)
+		"reeds":
+			_draw_reeds(resource_local)
+		"lily":
+			_draw_lily(resource_local, int(resource.get("variant", 0)))
+		"carcass":
+			_draw_carcass(resource_local, float(resource.get("quantity", 0)), str(resource.get("visual_state", "fresh")))
+
+func _draw_depth_entity(entity: Dictionary) -> void:
+	if bool(entity.get("metadata", {}).get("marine", false)) or entity.get("metadata", {}).get("in_cave", false) or entity.get("metadata", {}).get("cave_animal", false):
+		return
+	var entity_position := Vector2i(int(entity["x"]), int(entity["y"]))
+	var entity_local := map_to_local(entity_position)
+	if _is_coordinate_visible(entity_position) and _is_on_screen(entity_local, 150.0):
+		var key := str(entity.get("id", "%s,%s" % [entity["x"], entity["y"]]))
+		var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity_position))
+		if bool(entity.get("metadata", {}).get("vessel", false)):
+			var anchored := bool(entity.get("metadata", {}).get("anchored", true))
+			_draw_buildable_sprite(_map_vector_to_local(visual) + Vector2(0, sin(_visual_seconds*1.5)* (0.4 if anchored else 1.2)), "boat")
+		elif str(entity.get("kind", "agent")).to_lower() == "animal":
+			_draw_animal(_map_vector_to_local(visual), entity)
+		else:
+			_draw_agent(_map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO)), entity)
 
 
 func _draw_tile(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) -> void:
@@ -1119,10 +1142,10 @@ func _draw_mountain(coordinate: Vector2i, tile_center: Vector2, elevation: float
 		if str(_tiles.get(coordinate + offset, {}).get("terrain", "")).to_lower() == "mountain":
 			neighbors += 1
 	if _ridge_texture != null:
-		if (posmod(coordinate.x, 3) == 0 and posmod(coordinate.y, 2) == 0) or neighbors == 0:
+		if (posmod(coordinate.x, 5) == 0 and posmod(coordinate.y + int(coordinate.x / 5), 4) == 0) or neighbors == 0:
 			var variation := 0.94 + _seabed_random(coordinate, 93)*0.12
-			var height := 95.0 + clampf(elevation, 0.0, 1.0) * 30.0
-			draw_texture_rect_region(_ridge_texture, Rect2(tile_center + Vector2(-91,-height+14),Vector2(182*variation,height)),Rect2(Vector2.ZERO,_ridge_texture.get_size()))
+			var height := 125.0 + clampf(elevation, 0.0, 1.0) * 55.0
+			draw_texture_rect_region(_ridge_texture, Rect2(tile_center + Vector2(-112*variation,-height+14),Vector2(224*variation,height)),Rect2(Vector2.ZERO,_ridge_texture.get_size()))
 		return
 	var variation: int = posmod(coordinate.x * 17 + coordinate.y * 31, 11)
 	var is_major_peak: bool = variation < 5 or elevation > 0.86
