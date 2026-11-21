@@ -200,14 +200,16 @@ func _draw_caves() -> void:
 				surveyed[Vector2i(int(seen[0]), int(seen[1]))] = true
 			for cell: Array in cave.get("floor", []):
 				var local_cell := Vector2i(int(cell[0]), int(cell[1]))
-				if not surveyed.has(local_cell):
-					continue
+				# The observer sees the chamber shape; citizen discoveries stay private
+				# until surveyed. A new cave must not appear as one isolated exit tile.
+				var explored := surveyed.has(local_cell)
+				var visibility := 1.0 if explored else .58
 				var tile := coordinate + Vector2i(int(cell[0]), int(cell[1]))
 				var point := map_to_local(tile)
 				if not _is_on_screen(point, 150):
 					continue
 				var shade := _seabed_random(tile)
-				_interior_floor(tile,point,"cave-floor",PackedColorArray([Color("a39c91")]))
+				_interior_floor(tile,point,"cave-floor",PackedColorArray([Color("a39c91") * Color(visibility,visibility,visibility,1)]))
 				# Fine stone seams and grit preserve a readable, open walking surface.
 				for speck in range(7):
 					var offset := Vector2((_seabed_random(tile, speck + 30) - .5) * 38, (_seabed_random(tile, speck + 60) - .5) * 16)
@@ -220,7 +222,9 @@ func _draw_caves() -> void:
 						draw_colored_polygon(PackedVector2Array([a, b, b-rise, a-rise]), Color("34343d") if delta.x == -1 else Color("40404a"))
 						draw_line(a-rise, b-rise, Color("696671"), 3)
 						draw_line(a-rise*.45, b-rise*.45, Color("292a32"), 2)
-						props.append(["wall", point + Vector2(0, -5), 55, Color("a3a0a6")])
+						props.append(["wall", point + Vector2(0, -5), 55, Color("a3a0a6") * Color(visibility,visibility,visibility,1)])
+				if not explored:
+					continue
 				if _seabed_random(tile, 21) < 0.055 and local_cell.length() > 2:
 					var decoration := 2 if shade < .6 else 3
 					for glow in range(4, 0, -1):
@@ -240,6 +244,8 @@ func _draw_caves() -> void:
 			var entry := map_to_local(coordinate)
 			draw_arc(entry, 16, 0, TAU, 24, Color("b7b694"), 2)
 			draw_string(ThemeDB.fallback_font, entry + Vector2(-26, 27), "EXIT ↑", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("d6d2b7"))
+			if surveyed.size() < floor_lookup.size():
+				draw_string(ThemeDB.fallback_font, entry + Vector2(-63, 43), "Unexplored passages", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("aca798"))
 	else:
 		for entity: Dictionary in _ordered_entities:
 			var meta: Dictionary = entity.get("metadata", {})

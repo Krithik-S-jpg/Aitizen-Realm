@@ -18,7 +18,8 @@ func _run() -> void:
 			if pow(float(x)/7,2)+pow(float(y)/5,2) < 1:
 				floor.append([x,y])
 	var features := {"-3,-2":{"kind":"pool"}, "1,-3":{"kind":"ore","remaining":4}, "4,0":{"kind":"inscription"}, "-4,1":{"kind":"unstable"}}
-	tiles[Vector2i.ZERO].metadata.cave = {"id":"preview","floor":floor,"surveyed":floor,"features":features}
+	# Match a fresh saved world: only the entrance has been surveyed.
+	tiles[Vector2i.ZERO].metadata.cave = {"id":"preview","floor":floor,"surveyed":[[0,0]],"features":features}
 	renderer.render_world(tiles,[],[],[{"id":"explorer","x":0,"y":0,"kind":"agent","avatar_id":"juniper","action":"idle","metadata":{"in_cave":true,"cave_position":[0,0],"cave_id":"preview"}}])
 	renderer.set_cave_view(true)
 	await create_timer(1).timeout

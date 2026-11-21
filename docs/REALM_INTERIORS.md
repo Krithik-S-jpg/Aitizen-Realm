@@ -34,3 +34,7 @@ Built-in ImageGen was used, with transparent generation for prop/wildlife atlase
 - Live browser automation timed out. Browser FPS and hosted saved-world acceptance remain unverified. Synthetic benchmark supports `?renderer_benchmark=1&quality=balanced&environment=surface` (or `cave`, `underwater`); it does not mutate a backend world.
 
 No zero-frame-drop guarantee is implied by the export or headless tests.
+
+## Fresh-cave visibility correction
+
+Fresh caves contain only `[0, 0]` in their survey record. The observer now displays the entire chamber floor and walls, dimming unsurveyed terrain instead of hiding it. Discoveries and wildlife remain gated by survey records; this visual overview does not change citizen knowledge. `PreviewInteriors.gd` uses the entrance-only survey case to reproduce the reported empty-cave screen. The corrected room was rendered and visually inspected without resetting a world.
