@@ -45,6 +45,10 @@ static func ground(canvas, coordinate: Vector2i, tiles: Dictionary, diamond: Pac
 			var tint: Color = palette.get(other, Color("76816c"))
 			tint.a = 0.27 if other not in WET else 0.18
 			edge_band(canvas, diamond[edge], diamond[(edge + 1) % 4], center, tint, 0.44)
+	if terrain == "mountain" or (terrain in ["grass","stone","snow"] and OFFSETS.any(func(offset: Vector2i) -> bool: return str(tiles.get(coordinate+offset,{}).get("terrain","")).to_lower() == "mountain")):
+		for j: int in range(3):
+			var point := center + Vector2(-13+j*12, (seed+j)%7-3)
+			canvas.draw_circle(point, 3+j, Color(.42,.42,.34,.20))
 	if detail < 1 or wet:
 		return
 	# Sparse deterministic ground cover stays cached with the terrain layer.
@@ -104,6 +108,30 @@ class GroundBatch:
 		result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		return result
 
+static func entrance_path(start: Vector2i, roads: Dictionary, tiles: Dictionary, blocked: Dictionary) -> Array:
+	var parents := {start: start}
+	var pending: Array[Vector2i] = [start]
+	var index := 0
+	while index < pending.size() and index < 96:
+		var point := pending[index]
+		index += 1
+		if roads.has(point):
+			var route: Array = [point]
+			while point != start:
+				point = parents[point]
+				route.push_front(point)
+			return route
+		for offset: Vector2i in OFFSETS:
+			var next := point + offset
+			if parents.has(next) or blocked.has(next) or absi(next.x-start.x)+absi(next.y-start.y) > 6:
+				continue
+			var tile: Dictionary = tiles.get(next, {})
+			if tile.is_empty() or str(tile.get("terrain", "")).to_lower() in WET or not bool(tile.get("walkable", true)):
+				continue
+			parents[next] = point
+			pending.append(next)
+	return []
+
 static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resources: Array, structures: Array, palette: Dictionary, detail: int) -> ArrayMesh:
 	var batch := GroundBatch.new()
 	if detail == 0:
@@ -133,6 +161,15 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 		batch.draw_circle(base, radius, Color(0.05,0.10,0.09,0.09))
 		batch.draw_circle(base, radius * 0.72, Color(0.05,0.10,0.09,0.12))
 	var roads := {}
+	var blocked := tree_cells.duplicate()
+	for resource: Dictionary in resources:
+		if str(resource.get("type", "")) in ["stone","ore"]:
+			blocked[Vector2i(int(resource.x),int(resource.y))] = true
+	for structure: Dictionary in structures:
+		if str(structure.get("structure_type","")) in ["road","bridge","campfire","torch"]:
+			continue
+		for cell: Array in structure.get("footprint", [[int(structure.x),int(structure.y)]]):
+			blocked[Vector2i(int(cell[0]),int(cell[1]))] = true
 	for structure: Dictionary in structures:
 		if str(structure.get("structure_type", "")) == "road" and bool(structure.get("completed",false)):
 			roads[Vector2i(int(structure.get("x",0)),int(structure.get("y",0)))] = true
@@ -151,11 +188,14 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 				var edge := base + Vector2(-32+j*5, 12+j*2)
 				batch.draw_line(edge,edge+Vector2(0,-5),Color("65764b"),2)
 				batch.draw_circle(edge+Vector2(0,-5),1.7,Color("c7b880"))
-			# Only extend the worn approach toward a real neighboring road.
-			for offset: Vector2i in OFFSETS:
-				if roads.has(at+offset):
-					batch.draw_line(base+Vector2(15,14),renderer.map_to_local(at+offset),Color(0.58,0.50,0.34,0.35),8)
-					break
+			var entry: Array = structure.get("entrance", [at.x+1, at.y])
+			var route := entrance_path(Vector2i(int(entry[0]), int(entry[1])), roads, tiles, blocked)
+			var previous := base + Vector2(15,14)
+			for step: Vector2i in route:
+				var next: Vector2 = renderer.map_to_local(step)
+				batch.draw_line(previous, next, Color(0.58,0.50,0.34,0.35), 10)
+				previous = next
+
 		if kind in ["shelter","storage","tent","workbench"]:
 			batch.draw_circle(base + Vector2(6,4),34,Color(0.05,0.10,0.09,0.12))
 			for i: int in range(3):

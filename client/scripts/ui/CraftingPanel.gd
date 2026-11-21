@@ -142,7 +142,9 @@ func _add_blueprint_card(blueprint_name: String, blueprint: Dictionary) -> Panel
 	cost.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	details.add_child(cost)
 	var work := Label.new()
-	work.text = "%.0f work  ·  RECIPE KNOWN" % float(blueprint.get("work_required", 0.0))
+	work.text = "%.0f work  ·  %d ground tiles" % [float(blueprint.get("work_required", 0.0)), int(blueprint.get("ground_tiles",1))]
+	if bool(blueprint.get("entrance_required",false)):
+		work.text += "  ·  clear doorway"
 	work.add_theme_color_override("font_color", Color("75d7ba"))
 	work.add_theme_font_size_override("font_size", 12)
 	details.add_child(work)

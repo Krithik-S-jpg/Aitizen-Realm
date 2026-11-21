@@ -94,7 +94,7 @@ class NavigationService:
                 energy = entity.needs.energy if entity.needs else 0
                 reserve = 24 + min(12, float(entity.metadata.get("learned_dive_reserve", 0)))
                 if (
-                    oxygen <= (steps_home + 1) * 12 + reserve
+                    oxygen <= (steps_home + 1) * 16 + reserve
                     or energy <= (steps_home + 1) * 6 + reserve
                 ):
                     # An observed tight return budget increases future caution.
@@ -149,11 +149,15 @@ class NavigationService:
                 water = tile.terrain.value in {"WATER", "OCEAN"}
                 entity.metadata["underwater"] = water
                 entity.metadata["oxygen"] = (
-                    max(0, float(entity.metadata.get("oxygen", 100)) - 12)
+                    max(0, float(entity.metadata.get("oxygen", 100)) - (12 + 4 * MarineService.conditions(tile)["current"]))
                     if water
                     else 100
                 )
                 if water:
+                    conditions = MarineService.conditions(tile)
+                    entity.metadata["dive_conditions"] = conditions
+                    if entity.needs:
+                        entity.needs.body_temperature_c = max(34, entity.needs.body_temperature_c - max(0, 18-conditions["temperature_c"]) * .01)
                     entity.metadata["dive_phase"] = (
                         "surface"
                         if plan.next_step_index == len(plan.path) - 2
@@ -322,6 +326,7 @@ class NavigationService:
             raise ValueError("This citizen is already on a dive.")
         known = world.entity_knowledge.get(str(entity.id))
         start = (entity.x, entity.y)
+        MarineService(self._repository).initialize(world)
         path = [start]
         for _ in range(3):
             candidates = [
@@ -334,13 +339,14 @@ class NavigationService:
                 and candidate.terrain.value
                 in ({"WATER", "OCEAN"} if aboard else {"WATER"})
                 and not self._structure_blocks(world, *point)
+                and MarineService.safe_dive(world, entity, candidate)
             ]
             if not candidates:
                 break
             path.append(sorted(candidates)[0])
         if len(path) < 2:
             raise ValueError(
-                "No known shallow water beside this citizen. Move to a river or lake shore first."
+                "No known safe dive route. Check shore access, depth, current, visibility and diving equipment."
             )
         path += list(reversed(path[:-1]))
         plan = MovementPlan(
@@ -556,10 +562,11 @@ class NavigationService:
             )
         }
         blocked.update(
-            (site.x, site.y)
+            point
             for site in world.structures.values()
-            if site.completed
+            if (site.completed or site.footprint_version >= 2)
             and site.structure_type not in {StructureType.CAMPFIRE, StructureType.ROAD, StructureType.BRIDGE}
+            for point in site.footprint
         )
         roads = {
             (site.x, site.y)
@@ -638,9 +645,8 @@ class NavigationService:
             )
             for resource in world.resources.values()
         ) or any(
-            structure.x == x
-            and structure.y == y
-            and structure.completed
+            (x, y) in structure.footprint
+            and (structure.completed or structure.footprint_version >= 2)
             and structure.structure_type
             not in {StructureType.CAMPFIRE, StructureType.ROAD, StructureType.BRIDGE}
             for structure in world.structures.values()

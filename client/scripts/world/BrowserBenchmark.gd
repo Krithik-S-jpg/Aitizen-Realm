@@ -7,6 +7,7 @@ var frame := 0
 var previous := 0
 var label: Label
 var quality := "balanced"
+var environment := "surface"
 
 func _ready() -> void:
 	var camera := Camera2D.new()
@@ -17,6 +18,7 @@ func _ready() -> void:
 	renderer.position = Vector2(576,-100)
 	add_child(renderer)
 	quality = str(JavaScriptBridge.eval("new URLSearchParams(location.search).get('quality') || 'balanced'")) if OS.has_feature("web") else "balanced"
+	environment = str(JavaScriptBridge.eval("new URLSearchParams(location.search).get('environment') || 'surface'")) if OS.has_feature("web") else "surface"
 	renderer.set_visual_quality(quality)
 	var tiles := {}
 	for x: int in range(48):
@@ -30,11 +32,38 @@ func _ready() -> void:
 		structures.append({"id":str(i),"x":8+i%4*3,"y":8+i/4*3,"structure_type":"shelter","completed":true})
 	for i: int in range(32):
 		entities.append({"id":"bench%d"%i,"x":7+i%8,"y":10+i/8,"kind":"agent","avatar_id":"rowan" if i%2 else "juniper","action":"move","metadata":{}})
+	if environment == "underwater":
+		resources.clear()
+		structures.clear()
+		for at: Vector2i in tiles:
+			tiles[at] = {"terrain":"water","metadata":{"marine":{"habitat":"kelp" if at.x%3==0 else "reef","depth":2+at.x*.2}}}
+		for entity: Dictionary in entities:
+			entity.underwater = true
+			entity.oxygen = 90
+			entity.action = "swim"
+	if environment == "cave":
+		resources.clear()
+		structures.clear()
+		var floor: Array = []
+		for x: int in range(-8,9):
+			for y: int in range(-8,9):
+				if Vector2(x,y).length() < 8:
+					floor.append([x,y])
+		tiles[Vector2i(10,10)].metadata.cave = {"id":"benchmark","floor":floor,"surveyed":floor}
+		for i: int in range(entities.size()):
+			entities[i].x = 10
+			entities[i].y = 10
+			entities[i].metadata = {"in_cave":true,"cave_id":"benchmark","cave_position":[i%8-4,i/8-2]}
 	renderer.render_world(tiles,resources,structures,entities)
+	if environment == "underwater":
+		renderer.set_underwater_view(true)
+	elif environment == "cave":
+		renderer.set_cave_view(true)
 	renderer.configure_environment({"weather":"RAIN","weather_intensity":0.6,"wind_speed":10,"wind_direction":60})
 	var rain := WeatherOverlay.new()
 	rain.renderer = renderer
 	renderer.add_child(rain)
+	rain.visible = environment == "surface"
 	rain.set_visual_quality(quality)
 	rain.configure("RAIN",0.6,10,60,Vector2(0,500),24,64,32)
 	label = Label.new()
@@ -60,7 +89,7 @@ func _process(_delta: float) -> void:
 		for value: float in samples:
 			total += value
 		samples.sort()
-		var result := {"fps":300000.0/total,"median_ms":samples[150],"p95_ms":samples[285],"worst_ms":samples.back(),"draw_calls":Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),"quality":quality,"citizens":32,"homes":16,"rain":true,"camera_pan":true}
+		var result := {"fps":300000.0/total,"median_ms":samples[150],"p95_ms":samples[285],"worst_ms":samples.back(),"draw_calls":Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),"quality":quality,"citizens":32,"homes":16 if environment=="surface" else 0,"rain":environment=="surface","camera_pan":true,"environment":environment}
 		label.text = "Synthetic browser benchmark complete\n"+JSON.stringify(result)
 		print("BROWSER_PERF "+JSON.stringify(result))
 		set_process(false)

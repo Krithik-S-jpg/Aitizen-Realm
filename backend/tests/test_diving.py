@@ -9,13 +9,14 @@ def test_dive_explores_known_water_and_returns_with_oxygen():
     assert len(plan.path) <= 7
     navigation.advance_all(1)
     assert citizen.metadata["underwater"]
-    assert citizen.metadata["oxygen"] == 88
+    oxygen = citizen.metadata["oxygen"]
+    assert 80 < oxygen < 88  # Current increases effort, leaving a safe return reserve.
     with pytest.raises(ValueError):
         navigation.cancel(citizen.id)
     with pytest.raises(ValueError):
         navigation.plan(citizen.id, 3, 6, 1)
     restored = World.model_validate_json(world.model_dump_json())
-    assert restored.entities[str(citizen.id)].metadata["oxygen"] == 88
+    assert restored.entities[str(citizen.id)].metadata["oxygen"] == oxygen
     for tick in range(2, len(plan.path)):
         navigation.advance_all(tick)
     assert (citizen.x, citizen.y) == (3, 5)

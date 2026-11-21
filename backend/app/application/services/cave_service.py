@@ -90,6 +90,7 @@ class CaveService:
     @staticmethod
     def _expand_chambers(cave, seed):
         if cave.get("layout_version", 1) >= 2:
+            CaveService._features(cave, seed)
             return
         floor = {tuple(p) for p in cave["floor"]}
         # Three irregular rooms linked by two-tile-wide corridors.
@@ -109,6 +110,57 @@ class CaveService:
                     y += 1 if cy > y else -1
                 floor.update({(x, y), (x, y + 1)})
         cave.update(floor=[list(p) for p in sorted(floor)], layout_version=2)
+        CaveService._features(cave, seed)
+
+    @staticmethod
+    def _features(cave, seed):
+        if cave.get("features_version") == 1:
+            return
+        features = cave.setdefault("features", {})
+        for x, y in cave["floor"]:
+            if abs(x) + abs(y) < 3:
+                continue
+            roll = MarineService.sample(x + cave["x"], y + cave["y"], seed + 819)
+            kind = "ore" if roll < .07 else "pool" if roll < .11 else "inscription" if roll < .135 else "unstable" if roll < .16 else ""
+            if kind:
+                features.setdefault(f"{x},{y}", {"kind": kind, "remaining": 6 if kind == "ore" else 0})
+        cave.setdefault("surveyed", [[0, 0]])
+        cave["features_version"] = 1
+
+    def _survey(self, world, entity, cave, tick):
+        position = entity.metadata["cave_position"]
+        floor = {tuple(p) for p in cave["floor"]}
+        seen = {tuple(p) for p in cave.setdefault("surveyed", [[0, 0]])}
+        seen.update(p for p in floor if abs(p[0]-position[0])+abs(p[1]-position[1]) <= 1)
+        cave["surveyed"] = [list(p) for p in sorted(seen)]
+        maps = entity.metadata.setdefault("cave_maps", {})
+        personal = maps.setdefault(cave["id"], [])
+        if position not in personal:
+            personal.append(list(position))
+        key = f"{position[0]},{position[1]}"
+        feature = cave.get("features", {}).get(key)
+        if feature and feature["kind"] == "inscription":
+            site = next((site_id for site_id, site in world.ancient_sites.items()
+                         if abs(site.get("x", -999)-cave["x"])+abs(site.get("y", -999)-cave["y"]) <= 12), None)
+            if site:
+                feature["surface_site_id"] = site
+        if not feature:
+            return
+        discoveries = entity.metadata.setdefault("cave_discoveries", {})
+        event_key = cave["id"] + ":" + key
+        if event_key not in discoveries:
+            discoveries[event_key] = {"kind": feature["kind"], "tick": tick, "position": list(position), "cave_id": cave["id"], "surface_site_id": feature.get("surface_site_id")}
+            MemoryService(self.repository).remember(entity.id, EpisodeType.DISCOVERY, tick,
+                f"Found {feature['kind']} in a cave at passage ({key}); the entrance route is recorded.",
+                .85, discoveries[event_key])
+        inventory = world.inventories.get(str(entity.id))
+        if feature["kind"] == "ore" and inventory and inventory.items.get("stone_pickaxe", 0) >= 1:
+            accepted = inventory.add("ore", min(1, feature["remaining"]))
+            feature["remaining"] -= accepted
+        if feature["kind"] == "unstable":
+            entity.metadata["cave_warning"] = {"cave_id": cave["id"], "position": list(position), "tick": tick,
+                                               "message": "Loose rocks ahead. Return by the marked route."}
+            entity.metadata["cave_return_requested"] = True
 
     def enter(self, entity_id, tick):
         world = self.repository.get()
@@ -145,12 +197,19 @@ class CaveService:
                 if nxt in floor and nxt not in parents:
                     parents[nxt] = point
                     queue.append(nxt)
-        goal = next(reversed(parents))
+        seen = {tuple(p) for p in entity.metadata.get("cave_maps", {}).get(cave["id"], [])}
+        unseen = [p for p in parents if p not in seen and p != (0, 0)]
+        goal = unseen[0] if seen and unseen else next(reversed(parents))
         route = [goal]
         while parents[route[-1]] is not None:
             route.append(parents[route[-1]])
         route.reverse()
-        route = route[:6]
+        inventory = world.inventories.get(str(entity.id))
+        prepared = bool(inventory and inventory.has({"lamp": 1, "rope": 1})
+                        and any(inventory.items.get(item, 0) >= 1 for item in ("food", "fruit", "bread", "cooked_meat", "cooked_fish")))
+        route = route[:min(14, max(2, int((entity.needs.energy - 35) / 3)))] if prepared else route[:6]
+        entity.metadata["cave_prepared"] = prepared
+        entity.metadata.pop("cave_return_requested", None)
         route += list(reversed(route[:-1]))
         plan = world.movement_plans.get(str(entity.id))
         if plan:
@@ -164,9 +223,10 @@ class CaveService:
             cave_position=[0, 0],
             cave_route=route,
             cave_step=1,
+            cave_returning=False,
             cave_tick=tick,
             state="cave_explore",
-            last_decision_reason="Explore a connected cave passage, then return through its entrance.",
+            last_decision_reason=("Survey with lamp, rope and provisions; keep the return route marked." if prepared else "Scout entrance passages; bring a lamp, rope and food to explore farther."),
         )
         return cave
 
@@ -196,6 +256,12 @@ class CaveService:
                     data["cave_position"] = list(route[step])
                     data["cave_step"] += 1
                     entity.needs.energy = max(0, entity.needs.energy - 1)
+                    self._survey(world, entity, cave, tick)
+                    if (data.pop("cave_return_requested", False) or entity.needs.energy < 35) and not data.get("cave_returning"):
+                        visited = route[:data["cave_step"]]
+                        data["cave_route"] = visited + list(reversed(visited[:-1]))
+                        data["cave_returning"] = True
+                        route = data["cave_route"]
                 if data["cave_step"] >= len(route):
                     data.update(
                         in_cave=False, state="idle", expedition_cooldown=tick + 48

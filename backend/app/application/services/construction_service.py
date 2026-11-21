@@ -57,6 +57,37 @@ class ConstructionService:
         structure.materials_delivered = requirements.copy()
         return structure
 
+    @classmethod
+    def validate_space(cls, world, kind, x, y):
+        """Validate every foundation cell and preserve an accessible doorstep."""
+        if kind == StructureType.BRIDGE:
+            return
+        probe = Structure(structure_type=kind, x=x, y=y, builder_id="",
+                          work_required=1, footprint_version=2)
+        footprint = probe.footprint
+        large = len(footprint) > 1
+        reserved = footprint | ({probe.entrance} if kind not in {
+            StructureType.ROAD, StructureType.FARM, StructureType.CAMPFIRE, StructureType.TORCH} else set())
+        solid = {(r.x, r.y) for r in world.resources.values() if not r.depleted
+                 and r.resource_type in {ResourceType.TREE, ResourceType.STONE, ResourceType.ORE}}
+        for point in reserved:
+            tile = world.retrieve_tile(*point)
+            if not tile or not tile.walkable or tile.metadata.get("cave"):
+                raise ValueError("Foundation and entrance require clear, loaded land.")
+            if point in solid:
+                raise ValueError("Clear trees and rocks from the foundation and entrance.")
+        if any(not resource.depleted and (resource.x, resource.y) in footprint for resource in world.resources.values()):
+            raise ValueError("Clear resources from the foundation first.")
+        if any(entity.active and (entity.x, entity.y) in footprint for entity in world.entities.values()):
+            raise ValueError("Wait for citizens and animals to leave the foundation.")
+        for existing in world.structures.values():
+            if reserved & existing.footprint or (existing.footprint_version >= 2 and existing.entrance in footprint):
+                raise ValueError("Foundation overlaps a building or its entrance.")
+            if (large or len(existing.footprint) > 1) and kind not in {StructureType.ROAD, StructureType.BRIDGE, StructureType.TORCH} and existing.structure_type not in {StructureType.ROAD, StructureType.BRIDGE, StructureType.TORCH} and any(
+                abs(a[0]-b[0])+abs(a[1]-b[1]) <= 1 for a in footprint for b in existing.footprint
+            ):
+                raise ValueError("Leave a walking lane between large buildings.")
+
     def start_site(
         self, actor_id: str, structure_type: StructureType, x: int, y: int
     ) -> Structure:
@@ -87,9 +118,11 @@ class ConstructionService:
             for structure in world.structures.values()
         ):
             raise ValueError("A structure already occupies this tile.")
+        self.validate_space(world, structure_type, x, y)
         requirements, work_required = self.BLUEPRINTS[structure_type]
         structure = Structure(
             structure_type=structure_type,
+            footprint_version=2,
             x=x,
             y=y,
             builder_id=actor_id,
@@ -148,7 +181,9 @@ class ConstructionService:
     def blueprints(self) -> dict[str, dict[str, object]]:
         """Returns all currently supported construction recipes."""
         return {
-            kind.value.lower(): {"materials": materials, "work_required": work}
+            kind.value.lower(): {"materials": materials, "work_required": work,
+                "ground_tiles": 4 if kind in {StructureType.SHELTER, StructureType.TENT, StructureType.STORAGE, StructureType.FARM} else 1,
+                "entrance_required": kind not in {StructureType.ROAD, StructureType.BRIDGE, StructureType.FARM, StructureType.CAMPFIRE, StructureType.TORCH}}
             for kind, (materials, work) in self.BLUEPRINTS.items()
         }
 

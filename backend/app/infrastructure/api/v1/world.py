@@ -369,6 +369,8 @@ def _format_structure(structure: Any) -> dict[str, Any]:
         "funded": structure.funded,
         "missing_materials": structure.missing_materials,
         "progress_ratio": structure.progress / structure.work_required,
+        "footprint": sorted(structure.footprint),
+        "entrance": structure.entrance,
     }
 
 

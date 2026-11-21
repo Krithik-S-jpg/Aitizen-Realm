@@ -1617,6 +1617,8 @@ class DecisionService:
                 and not NavigationService._structure_blocks(world, tile.x, tile.y)
                 and f"{assigned_home.x + dx},{assigned_home.y + dy}" in knowledge.tiles
             ]
+            if assigned_home.footprint_version >= 2:
+                bed_spots = [p for p in bed_spots if p == assigned_home.entrance]
             if bed_spots:
                 index = int(entity.metadata.get("bed_index", 0)) % len(bed_spots)
                 x, y = bed_spots[index]
@@ -1737,6 +1739,10 @@ class DecisionService:
                     and (x, y) not in occupied
                     and (x, y) not in blocked
                 ):
+                    try:
+                        ConstructionService.validate_space(world, structure_type or StructureType.SHELTER, x, y)
+                    except ValueError:
+                        continue
                     return x, y
         raise ValueError("No nearby vacant construction tile is available.")
 

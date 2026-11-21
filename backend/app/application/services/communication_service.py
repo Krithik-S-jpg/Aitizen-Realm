@@ -17,7 +17,7 @@ class CommunicationService:
     MAX_RANGE = 6
     MAX_SHARED_RECORDS = 25
     SHARE_CONFIDENCE = 0.75
-    CATEGORIES = {"tiles", "resources", "structures", "entities", "discoveries"}
+    CATEGORIES = {"tiles", "resources", "structures", "entities", "discoveries", "cave_routes"}
 
     def __init__(
         self,
@@ -246,6 +246,19 @@ class CommunicationService:
         recipient_knowledge = world.entity_knowledge[str(recipient.id)]
         transferred = 0
         for category, keys in requested.items():
+            if category == "cave_routes":
+                from copy import deepcopy
+                for key in keys:
+                    route = sender.metadata.get("cave_maps", {}).get(key)
+                    if not route:
+                        continue
+                    recipient.metadata.setdefault("reported_cave_routes", {})[key] = {
+                        "route": deepcopy(route), "source_id": str(sender.id), "tick": tick,
+                        "warning": deepcopy(sender.metadata.get("cave_warning", {}))
+                        if sender.metadata.get("cave_warning", {}).get("cave_id") == key else {},
+                        "confidence": self.SHARE_CONFIDENCE}
+                    transferred += 1
+                continue
             source: dict[str, KnowledgeRecord] = getattr(sender_knowledge, category)
             destination: dict[str, KnowledgeRecord] = getattr(
                 recipient_knowledge, category

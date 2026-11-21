@@ -145,6 +145,45 @@ func set_cave_view(enabled: bool) -> void:
 		_dynamic_layer.set_cave_view(enabled)
 	queue_redraw()
 
+var _interior_ground: Dictionary = {}
+
+func _ground_material(name: String) -> Texture2D:
+	if not _interior_ground.has(name):
+		var path := "res://assets/world/cohesive/" + name + ".png"
+		if not ResourceLoader.exists(path):
+			return null
+		var material := CanvasTexture.new()
+		material.diffuse_texture = load(path)
+		material.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		material.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+		_interior_ground[name] = material
+	return _interior_ground[name]
+
+func _interior_floor(coordinate: Vector2i, point: Vector2, name: String, colors: PackedColorArray) -> void:
+	var uv := PackedVector2Array()
+	for offset: Vector2 in [Vector2.ZERO,Vector2(1,0),Vector2(1,1),Vector2(0,1)]:
+		uv.append((Vector2(coordinate)+offset)/4.0)
+	draw_polygon(_diamond_at(point), colors, uv, _ground_material(name))
+
+func _water_corner_tint(corner: Vector2i) -> Color:
+	var depth := 0.0
+	var count := 0
+	for offset: Vector2i in [Vector2i.ZERO,Vector2i(-1,0),Vector2i(0,-1),Vector2i(-1,-1)]:
+		var cell: Dictionary = _tiles.get(corner+offset,{})
+		if str(cell.get("terrain","")).to_lower() in ["water","ocean"]:
+			depth += float(cell.get("metadata",{}).get("marine",{}).get("depth",5))
+			count += 1
+	var blend := clampf((depth/maxi(count,1)-2)/12.0,0,1)
+	return Color("699f9b").lerp(Color("1d4a69"),blend)
+
+func _interior_prop(key: String, base: Vector2, height: float, tint := Color.WHITE) -> void:
+	var region: Rect2 = CohesiveArt.region("interiors", key)
+	var texture: Texture2D = CohesiveArt.texture("interiors")
+	if texture == null or region.size.y <= 0:
+		return
+	var size := region.size * (height / region.size.y)
+	draw_texture_rect_region(texture, Rect2(base - Vector2(size.x * .5, size.y), size), region, tint)
+
 func _draw_caves() -> void:
 	if not _is_dynamic_layer:
 		draw_rect(Rect2(-1000000, -1000000, 2000000, 2000000), Color("17171c"))
@@ -152,23 +191,23 @@ func _draw_caves() -> void:
 			var cave: Dictionary = _tiles[coordinate].get("metadata", {}).get("cave", {})
 			if cave.is_empty():
 				continue
+			var props: Array = []
 			var floor_lookup := {}
 			for at: Array in cave.get("floor", []):
 				floor_lookup[Vector2i(int(at[0]), int(at[1]))] = true
+			var surveyed := {}
+			for seen: Array in cave.get("surveyed", cave.get("floor", [])):
+				surveyed[Vector2i(int(seen[0]), int(seen[1]))] = true
 			for cell: Array in cave.get("floor", []):
 				var local_cell := Vector2i(int(cell[0]), int(cell[1]))
+				if not surveyed.has(local_cell):
+					continue
 				var tile := coordinate + Vector2i(int(cell[0]), int(cell[1]))
 				var point := map_to_local(tile)
 				if not _is_on_screen(point, 150):
 					continue
 				var shade := _seabed_random(tile)
-				draw_colored_polygon(_diamond_at(point), Color("55545a").lerp(Color("45454d"), shade))
-				var rock_region: Array = _terrain_sprite_regions.get("stone", [])
-				if rock_region.size() == 4 and _environment_atlas != null:
-					var uv := PackedVector2Array()
-					for offset: Vector2 in [Vector2(104, 61), Vector2(162, 96), Vector2(104, 132), Vector2(47, 96)]:
-						uv.append((Vector2(rock_region[0], rock_region[1]) + offset) / _environment_atlas.get_size())
-					draw_polygon(_diamond_at(point), PackedColorArray([Color(.58, .56, .64, .5)]), uv, _environment_atlas)
+				_interior_floor(tile,point,"cave-floor",PackedColorArray([Color("a39c91")]))
 				# Fine stone seams and grit preserve a readable, open walking surface.
 				for speck in range(7):
 					var offset := Vector2((_seabed_random(tile, speck + 30) - .5) * 38, (_seabed_random(tile, speck + 60) - .5) * 16)
@@ -181,13 +220,23 @@ func _draw_caves() -> void:
 						draw_colored_polygon(PackedVector2Array([a, b, b-rise, a-rise]), Color("34343d") if delta.x == -1 else Color("40404a"))
 						draw_line(a-rise, b-rise, Color("696671"), 3)
 						draw_line(a-rise*.45, b-rise*.45, Color("292a32"), 2)
-						if shade < .28:
-							_water_asset(_cave_texture, 1, 1, 4, 4, point + Vector2(0, -8), Vector2(45, 45), Color("9995a3"))
+						props.append(["wall", point + Vector2(0, -5), 55, Color("a3a0a6")])
 				if _seabed_random(tile, 21) < 0.055 and local_cell.length() > 2:
 					var decoration := 2 if shade < .6 else 3
 					for glow in range(4, 0, -1):
 						draw_circle(point, glow * 7, Color(.12, .55, .65, .018))
-					_water_asset(_cave_texture, decoration, 1, 4, 4, point + Vector2(0, -7), Vector2(48, 48))
+					props.append(["crystal" if decoration == 2 else "stalagmite", point, 35])
+				var feature: Dictionary = cave.get("features", {}).get("%d,%d" % [local_cell.x, local_cell.y], {})
+				var feature_kind := str(feature.get("kind", ""))
+				if feature_kind == "ore" and float(feature.get("remaining", 0)) > 0:
+					props.append(["vein", point, 32])
+				elif feature_kind in ["pool", "inscription"]:
+					props.append([feature_kind, point, 28 if feature_kind == "pool" else 38])
+				elif feature_kind == "unstable":
+					props.append(["stalagmite", point, 24, Color("b59e85")])
+			props.sort_custom(func(a: Array, b: Array) -> bool: return a[1].y < b[1].y)
+			for prop: Array in props:
+				_interior_prop(prop[0],prop[1],prop[2],prop[3] if prop.size()>3 else Color.WHITE)
 			var entry := map_to_local(coordinate)
 			draw_arc(entry, 16, 0, TAU, 24, Color("b7b694"), 2)
 			draw_string(ThemeDB.fallback_font, entry + Vector2(-26, 27), "EXIT ↑", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("d6d2b7"))
@@ -202,8 +251,14 @@ func _draw_caves() -> void:
 			if not _is_on_screen(point, 100):
 				continue
 			if meta.get("cave_animal", false):
-				_water_asset(_cave_texture, int(_visual_seconds * 8) % 4, 2 if meta.get("species") == "bat" else 3, 4, 4, point + Vector2(0, -12), Vector2(60, 60))
+				var cave: Dictionary = _tiles.get(Vector2i(int(entity.x),int(entity.y)),{}).get("metadata",{}).get("cave",{})
+				if cave.has("surveyed") and cell not in cave.surveyed:
+					continue
+				_water_asset(_marine_life_texture, 0 if meta.get("state") == "rest" else int(_visual_seconds * 8) % 4, 4 if meta.get("species") == "bat" else 5, 4, 6, point + Vector2(0, -12), Vector2(48, 48) if meta.get("species") == "bat" else Vector2(25,25))
 			else:
+				if meta.get("cave_prepared", false):
+					for ring: int in range(3,0,-1):
+						draw_circle(point + Vector2(0,-12), ring*17, Color(1,.75,.36,.025))
 				_draw_agent(point, entity)
 var _marine_texture: Texture2D
 var _swim_texture: Texture2D
@@ -249,37 +304,30 @@ func _draw_underwater() -> void:
 		var wet := str(_tiles[coordinate].get("terrain", "")).to_lower() in ["water", "ocean"]
 		var habitat: Dictionary = _tiles[coordinate].get("metadata", {}).get("marine", {})
 		if not _is_dynamic_layer:
-			var terrain := str(_tiles[coordinate].get("terrain", "")).to_lower()
-			var depth := 0.55 + sin(coordinate.x * 0.12 + coordinate.y * 0.17) * 0.22
-			if not habitat.is_empty():
-				depth = clampf(float(habitat.get("depth", 5)) / 14.0, 0.1, 0.9)
-			if terrain == "ocean":
-				depth += 0.2
-			var seabed := Color("286887").lerp(Color("0a2c51"), clampf(depth, 0, 1)) if wet else Color("10263e")
-			var diamond := _diamond_at(point)
-			draw_colored_polygon(diamond, seabed)
-			var region: Array = _terrain_sprite_regions.get("sand", [])
-			if region.size() == 4 and _environment_atlas != null:
-				var uv := PackedVector2Array()
-				for offset: Vector2 in [Vector2(104, 61), Vector2(162, 96), Vector2(104, 132), Vector2(47, 96)]:
-					uv.append((Vector2(region[0], region[1]) + offset) / _environment_atlas.get_size())
-				draw_polygon(diamond, PackedColorArray([Color(seabed.lightened(0.2), 0.55) if wet else Color(0.05, 0.13, 0.23, 0.85)]), uv, _environment_atlas)
+			if wet:
+				var colors := PackedColorArray()
+				for offset: Vector2i in [Vector2i.ZERO,Vector2i(1,0),Vector2i(1,1),Vector2i(0,1)]:
+					colors.append(_water_corner_tint(coordinate+offset))
+				_interior_floor(coordinate,point,"seabed-floor",colors)
+			else:
+				draw_colored_polygon(_diamond_at(point),Color("10263e"))
+
 		elif wet:
 			var roll := _seabed_random(coordinate)
 			var patch := sin(coordinate.x * 0.41) * cos(coordinate.y * 0.33)
 			var jitter := Vector2((_seabed_random(coordinate, 1) - 0.5) * 20, (_seabed_random(coordinate, 2) - 0.5) * 9)
 			if (str(habitat.get("habitat", "")) == "kelp" or (habitat.is_empty() and patch > 0.12)) and roll < 0.46:
 				var height := lerpf(60, 105, _seabed_random(coordinate, 5))
-				_water_asset(_marine_texture, int(_visual_seconds * 3 + roll * 8) % 4, 1, 4, 4, point + jitter + Vector2(0, -height * 0.25), Vector2(height * 0.7, height), Color("438eac"))
+				_interior_prop("kelp", point + jitter + Vector2(sin(_visual_seconds + roll*12)*1.5, 0), height * .7, Color("7aaeb0"))
 			elif roll > 0.9:
 				var prop := 1 if roll < 0.97 else 0
-				_water_asset(_marine_texture, prop, 2, 4, 4, point + jitter, Vector2(80, 65), Color("689aba"))
-			if str(habitat.get("landmark", "")) in ["wreck", "cave"]:
-				_water_asset(_marine_life_texture, 1 if habitat.landmark == "wreck" else 2, 3, 4, 4, point + Vector2(0, -18), Vector2(100, 100), Color("80bbc7"))
+				_interior_prop("seagrass" if prop == 1 else "coral", point+jitter, 28, Color("87b8bc"))
+			if str(habitat.get("landmark", "")) in ["wreck", "cave", "ruin"]:
+				_interior_prop("wreck" if habitat.landmark == "wreck" else "columns" if habitat.landmark == "ruin" else "sea_arch", point, 65, Color("80bbc7"))
 			elif str(habitat.get("habitat", "")) == "reef" and roll < 0.3:
-				_water_asset(_marine_texture, 0, 2, 4, 4, point, Vector2(65, 55), Color("a49fc6"))
+				_interior_prop("coral", point, 36, Color("a49fc6"))
 			if str(habitat.get("item", "")) == "pearl" and float(habitat.get("remaining", 0)) > 0:
-				_water_asset(_marine_life_texture, 3, 3, 4, 4, point, Vector2(28, 28), Color("a9c9d8"))
+				_interior_prop("shellfish", point, 16, Color("a9c9d8"))
 			if roll < 0.025:
 				var ray := PackedVector2Array([point + Vector2(-30, -210), point + Vector2(-10, -210), point + Vector2(70, 10), point + Vector2(10, 10)])
 				draw_colored_polygon(ray, Color(0.5, 0.85, 1, 0.025 + 0.01 * sin(_visual_seconds + roll * 50)))
@@ -306,11 +354,11 @@ func _draw_underwater() -> void:
 		if bool(metadata.get("marine", false)):
 			var species := str(metadata.get("species", "reef_fish"))
 			var marine_row: int = {"reef_fish": 0, "crab": 1, "jellyfish": 2, "shark": 3}.get(species, 0)
-			var frame := 0 if species == "shark" else int(_visual_seconds * 6) % 4
+			var frame := int(_visual_seconds * 6) % 4
 			if species == "crab" and float(_entity_motion_amounts.get(key, 0)) < 0.01:
 				frame = 0
 			draw_set_transform(center + Vector2(0, -5 if species == "crab" else -25), 0, Vector2(float(_entity_facing.get(key, 1)), 1))
-			_water_asset(_marine_life_texture, frame, marine_row, 4, 4, Vector2.ZERO, Vector2(85, 65) if species == "shark" else Vector2(45, 45), Color("b0e1ec"))
+			_water_asset(_marine_life_texture, frame, marine_row, 4, 6, Vector2.ZERO, Vector2(85, 65) if species == "shark" else Vector2(38, 38), Color("b0e1ec"))
 			draw_set_transform(Vector2.ZERO)
 			continue
 		var row: int = CITIZEN_AQUATIC_ROWS.get(str(entity.get("avatar_id", "scout")), 0)
@@ -814,8 +862,8 @@ func _draw() -> void:
 	_update_local_view_rect()
 	if _marine_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/marine_atlas.png"):
 		_marine_texture = load("res://assets/pixel_art/aquatic/marine_atlas.png")
-	if _marine_life_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/marine_life_v1.png"):
-		_marine_life_texture = load("res://assets/pixel_art/aquatic/marine_life_v1.png")
+	if _marine_life_texture == null and ResourceLoader.exists("res://assets/world/cohesive/interior-wildlife.png"):
+		_marine_life_texture = load("res://assets/world/cohesive/interior-wildlife.png")
 	if _diving_actions_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/diving_actions_v1.png"):
 		_diving_actions_texture = load("res://assets/pixel_art/aquatic/diving_actions_v1.png")
 	if _swim_texture == null and ResourceLoader.exists("res://assets/pixel_art/aquatic/swimming_atlas.png"):
@@ -857,6 +905,9 @@ func _draw() -> void:
 		var key := str(entity.get("id", "%s,%s" % [entity.x, entity.y]))
 		var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity.x, entity.y))
 		objects.append({"kind": "entity", "data": entity, "base": _map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO))})
+	for coordinate: Vector2i in _ordered_coordinates:
+		if not _tiles[coordinate].get("metadata", {}).get("cave", {}).is_empty():
+			objects.append({"kind":"entrance", "data":{"id":"cave-%s"%coordinate}, "base":map_to_local(coordinate)})
 	objects = objects.filter(func(item: Dictionary) -> bool: return _is_on_screen(item.base, 180.0))
 	objects.sort_custom(_sort_ground_objects)
 	for object: Dictionary in objects:
@@ -866,6 +917,7 @@ func _draw() -> void:
 			"resource": _draw_depth_resource(object.data)
 			"structure": _draw_structure(object.base, object.data)
 			"entity": _draw_depth_entity(object.data)
+			"entrance": _interior_prop("entrance", object.base+Vector2(0,9),73)
 
 	_draw_highlight(_hovered_tile, HOVER_COLOR, 1.5)
 	_draw_highlight(_selected_tile, SELECTED_COLOR, 2.5)
@@ -966,8 +1018,7 @@ func _draw_tile(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) ->
 		_draw_tile_details(coordinate, center, terrain, variant)
 	if _draw_detail_level > 0 and terrain == "mountain":
 		_draw_mountain(coordinate, center, float(tile_data.get("metadata", {}).get("elevation", 0.8)))
-	if not tile_data.get("metadata", {}).get("cave", {}).is_empty():
-		_water_asset(_cave_texture, 0, 1, 4, 4, center + Vector2(0, -25), Vector2(135, 135))
+
 
 
 func shoreline_edges(coordinate: Vector2i) -> Array[int]:

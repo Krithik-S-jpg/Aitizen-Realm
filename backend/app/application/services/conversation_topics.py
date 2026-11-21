@@ -5,6 +5,11 @@ def discuss(service, world, speaker, listener, tick):
     knowledge = world.entity_knowledge[str(speaker.id)]
     other = world.entity_knowledge[str(listener.id)]
     topics = []
+    for cave_id, route in speaker.metadata.get("cave_maps", {}).items():
+        if cave_id not in listener.metadata.get("reported_cave_routes", {}):
+            caution = speaker.metadata.get("cave_warning", {}).get("message", "I marked the route back to the entrance.")
+            topics.append((f"cave:{cave_id}", f"I explored {len(route)} cave passages. {caution}",
+                           "I'll check those passages carefully and keep the return route in mind.", {"cave_routes":[cave_id]}))
     ambition = speaker.metadata.get("ambition", {})
     if ambition:
         topics.append(("ambition", f"I want to {ambition['title'].lower()}. My progress is {ambition['progress']:g} of {ambition['target']:g}.",

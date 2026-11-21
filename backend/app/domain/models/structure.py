@@ -32,6 +32,7 @@ class Structure(BaseModel):
     x: int
     y: int
     builder_id: str
+    footprint_version: int = 1
     progress: float = Field(default=0.0, ge=0.0)
     work_required: float = Field(gt=0.0)
     stockpile: Inventory = Field(default_factory=lambda: Inventory(capacity=500.0))
@@ -47,6 +48,18 @@ class Structure(BaseModel):
     condition: float = Field(default=100.0, ge=0.0, le=100.0)
     last_upkeep_day: int = Field(default=0, ge=0)
     last_tended_tick: int | None = Field(default=None, ge=0)
+
+    @property
+    def footprint(self) -> set[tuple[int, int]]:
+        """Legacy saves keep their occupied tile; new large buildings reserve ground."""
+        large = self.structure_type in {StructureType.SHELTER, StructureType.TENT,
+                                       StructureType.STORAGE, StructureType.FARM}
+        offsets = ((0, 0), (-1, 0), (0, -1), (-1, -1)) if large and self.footprint_version >= 2 else ((0, 0),)
+        return {(self.x + dx, self.y + dy) for dx, dy in offsets}
+
+    @property
+    def entrance(self) -> tuple[int, int]:
+        return self.x + 1, self.y
 
     @property
     def completed(self) -> bool:

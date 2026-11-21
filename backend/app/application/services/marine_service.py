@@ -54,10 +54,10 @@ class MarineService:
                     if patch < -0.25
                     else "rock"
                 )
-                landmark = "wreck" if roll > 0.995 else "cave" if roll > 0.985 else ""
+                landmark = "ruin" if roll > .998 else "wreck" if roll > 0.995 else "cave" if roll > 0.985 else ""
                 item = (
                     "salvage"
-                    if landmark == "wreck"
+                    if landmark in {"wreck", "ruin"}
                     else "mineral"
                     if habitat == "rock"
                     else "seaweed"
@@ -72,6 +72,9 @@ class MarineService:
                     landmark=landmark,
                     item=item,
                     remaining=3 if item != "pearl" else 1,
+                    current=.15 if near_shore else round(.2 + roll * .5, 2),
+                    visibility=.85 if near_shore else .65,
+                    temperature_c=18 if depth < 10 else 10,
                 )
                 if roll > 0.045 or count >= 160:
                     continue
@@ -106,6 +109,24 @@ class MarineService:
                 )
                 count += 1
         world.marine_initialized = True
+
+    @staticmethod
+    def conditions(tile):
+        habitat = tile.metadata.get("marine", {})
+        return {"depth": float(habitat.get("depth", 2)),
+                "current": float(habitat.get("current", .15)),
+                "visibility": float(habitat.get("visibility", .85)),
+                "temperature_c": float(habitat.get("temperature_c", 18))}
+
+    @classmethod
+    def safe_dive(cls, world, entity, tile):
+        conditions = cls.conditions(tile)
+        inventory = world.inventories.get(str(entity.id))
+        equipped = bool(inventory and inventory.items.get("diving_gear", 0) >= 1)
+        return (conditions["depth"] <= (12 if equipped else 5)
+                and conditions["current"] <= (.85 if equipped else .55)
+                and conditions["visibility"] >= .25
+                and conditions["temperature_c"] >= (6 if equipped else 12))
 
     def advance_all(self, tick: int) -> None:
         """Advance active marine animals at most once per simulation tick."""

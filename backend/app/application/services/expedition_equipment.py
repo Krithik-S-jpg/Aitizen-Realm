@@ -13,6 +13,10 @@ def prepare(decisions, world, trip, members, tick):
         key = str(actor.id)
         inventory = world.inventories[key]
         required = {"fiber": 1}
+        if trip.get("kind") == "cave":
+            required.update(lamp=1, rope=1, stone_pickaxe=1)
+            if not any(inventory.items.get(food, 0) >= 1 for food in ("food","fruit","bread","cooked_meat","cooked_fish")):
+                required["food"] = 1
         if trip.get("kind") == "boat" and not actor.metadata.get("boat_id"):
             required["boat"] = 1
         missing = {item: count - inventory.items.get(item, 0) for item, count in required.items()
@@ -31,16 +35,16 @@ def prepare(decisions, world, trip, members, tick):
         item, amount = next(iter(missing.items()))
         action_type = ActionType.MOVE
         target = decisions._storage_trip(world, actor, item, amount, True)
-        if target is None and item == "boat":
-            recipe = decisions._resources.CRAFTING_RECIPES["boat"]
+        if target is None and item in decisions._resources.CRAFTING_RECIPES:
+            recipe = decisions._resources.CRAFTING_RECIPES[item]
             if inventory.has(recipe):
-                action_type, target = ActionType.CRAFT, {"item_type": "boat"}
+                action_type, target = ActionType.CRAFT, {"item_type": item}
             else:
                 item, amount = next((m, n-inventory.items.get(m, 0)) for m, n in recipe.items()
                                     if inventory.items.get(m, 0) < n)
                 target = decisions._storage_trip(world, actor, item, amount, True)
         if target is None:
-            kinds = {"wood": (ResourceType.LOG, ResourceType.TREE), "fiber": (ResourceType.REEDS,)}
+            kinds = {"wood": (ResourceType.LOG, ResourceType.TREE), "fiber": (ResourceType.REEDS,), "stone": (ResourceType.STONE,), "food": (ResourceType.PLANT, ResourceType.BUSH)}
             for kind in kinds.get(item, ()):
                 try:
                     target = decisions._resource_target(world, actor, kind)

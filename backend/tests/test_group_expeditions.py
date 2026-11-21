@@ -89,6 +89,9 @@ def test_equipment_is_gathered_before_departure():
 def test_cave_party_roundtrip():
     from app.application.services.cave_service import CaveService
     world, a, b, decisions = supplied_party()
+    for actor in (a, b):
+        for item in ("lamp", "rope", "stone_pickaxe"):
+            world.inventories[str(actor.id)].add(item, 1)
     world.caves_initialized = True
     world.caves = {"test": dict(id="test", x=6, y=5, floor=[[0, 0], [1, 0], [2, 0]])}
     advance(decisions, world, 6, True)

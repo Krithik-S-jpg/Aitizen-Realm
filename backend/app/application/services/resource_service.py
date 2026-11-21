@@ -29,6 +29,9 @@ class ResourceService:
     }
     CRAFTING_RECIPES: dict[str, dict[str, float]] = {
         "stone_axe": {"wood": 2.0, "stone": 3.0},
+        "lamp": {"wood": 2.0, "fiber": 2.0, "stone": 1.0},
+        "rope": {"fiber": 3.0},
+        "diving_gear": {"fiber": 6.0, "wood": 2.0},
         "stone_pickaxe": {"wood": 2.0, "stone": 4.0},
         "basket": {"fiber": 6.0},
         "boat": {"wood": 20.0, "fiber": 8.0},

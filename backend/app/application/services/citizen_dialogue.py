@@ -11,6 +11,10 @@ def context_for(world, citizen, partner):
     history = [m for m in citizen.metadata.get("conversation", [])
                if {m.get("sender_id"), m.get("recipient_id")} == {str(citizen.id), str(partner.id)}][-6:]
     return {"name": citizen.name, "partner": partner.name, "diet": citizen.diet,
+            "cave_findings": list(citizen.metadata.get("cave_discoveries", {}).values())[-3:],
+            "cave_warning": citizen.metadata.get("cave_warning", {}),
+            "reported_cave_routes": list(citizen.metadata.get("reported_cave_routes", {}).values())[-2:],
+            "marine_findings": list(citizen.metadata.get("marine_discoveries", {}).values())[-3:],
             "curiosity": citizen.metadata.get("curiosity", {}),
             "archaeological_evidence": [{"facts": r.data, "confidence": r.confidence,
                                         "source": str(r.source_entity_id) if r.source_entity_id else "personal observation"}
@@ -94,7 +98,10 @@ class CitizenDialogue:
                 other = world.entity_knowledge[str(listener.id)].discoveries
                 share = [k for k, r in known.items() if k not in other or
                          (r.data.get("inspected") and not other[k].data.get("inspected"))][:1]
-                service.send(speaker.id, listener.id, line, tick, {"discoveries": share}, origin="local_llm")
+                shared = {"discoveries": share}
+                if any(word in line.lower() for word in ("cave", "passage", "tunnel")):
+                    shared["cave_routes"] = list(speaker.metadata.get("cave_maps", {}))[-1:]
+                service.send(speaker.id, listener.id, line, tick, shared, origin="local_llm")
                 speaker.metadata["dialogue_status"] = "Spoke in own words · local LLM"
         except (ValueError, KeyError, TypeError, httpx.HTTPError):
             for citizen in (a, b):
