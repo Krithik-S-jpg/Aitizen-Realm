@@ -632,7 +632,7 @@ func _nav_button(caption: String, callback: Callable, active: bool = false) -> B
 	var button := Button.new()
 	button.text = caption
 	button.set_meta("mode", caption.to_lower())
-	button.custom_minimum_size = Vector2(76, 40)
+	button.custom_minimum_size = Vector2(72, 34)
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.toggle_mode = true
 	button.button_group = _nav_group
@@ -734,7 +734,7 @@ func _apply_responsive_layout() -> void:
 		return
 	var viewport_size := get_viewport_rect().size
 	_motto.visible = viewport_size.x >= 1500.0
-	_brand.custom_minimum_size.x = 180.0
+	_brand.custom_minimum_size.x = 156.0
 	_brand.visible = viewport_size.x >= 1100.0
 	_main_header.get_child(0).alignment = BoxContainer.ALIGNMENT_CENTER
 	_main_header.get_child(0).add_theme_constant_override("separation", 8)
@@ -743,7 +743,7 @@ func _apply_responsive_layout() -> void:
 	_command_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	_command_bar.position = Vector2(viewport_size.x - 590, viewport_size.y - 84)
 	_agent_card.position = Vector2(18, viewport_size.y - 126)
-	_time_panel.size = Vector2(450, 58)
+	_time_panel.size = Vector2(410, 52)
 	_status_bar.visible = false
 	if viewport_size.x < 1380.0:
 		for child: Control in _main_header.get_child(0).get_child(1).get_children():

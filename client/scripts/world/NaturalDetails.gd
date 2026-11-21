@@ -14,6 +14,11 @@ static func ground(canvas, coordinate: Vector2i, tiles: Dictionary, diamond: Pac
 	var center := (diamond[0] + diamond[2]) * 0.5
 	var seed := posmod(coordinate.x * 73 + coordinate.y * 37, 101)
 	var wet := terrain in WET
+	# Low-frequency variation spans several tiles instead of per-tile noise.
+	if not wet and detail > 0:
+		var variation := sin(coordinate.x * .31 + sin(coordinate.y * .23)) * cos(coordinate.y * .27)
+		var tint := Color(.22,.28,.15,absf(variation)*.065) if variation < 0 else Color(.78,.70,.43,variation*.065)
+		canvas.draw_colored_polygon(diamond,tint)
 	if wet:
 		for corner: int in range(4):
 			var before: Dictionary = tiles.get(coordinate + OFFSETS[posmod(corner - 1, 4)], {})
@@ -173,6 +178,12 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 	for structure: Dictionary in structures:
 		if str(structure.get("structure_type", "")) == "road" and bool(structure.get("completed",false)):
 			roads[Vector2i(int(structure.get("x",0)),int(structure.get("y",0)))] = true
+	# Doorways are also destinations, so a village without paved roads still
+	# has continuous worn paths. Never connect through a foundation or trunk.
+	for structure: Dictionary in structures:
+		if bool(structure.get("completed",false)) and str(structure.get("structure_type","")) in ["shelter","tent","storage","workbench","well"]:
+			var door: Array = structure.get("entrance",[int(structure.x)+1,int(structure.y)])
+			roads[Vector2i(int(door[0]),int(door[1]))] = true
 	for structure: Dictionary in structures:
 		if not bool(structure.get("completed", false)):
 			continue
@@ -182,14 +193,16 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 		var base: Vector2 = renderer.map_to_local(at) + Vector2(0,2)
 		var kind := str(structure.get("structure_type", "")).to_lower()
 		foundation(batch,base,kind,detail)
-		if kind in ["shelter", "house", "home"]:
+		if kind in ["shelter", "house", "home", "tent", "storage", "workbench", "well"]:
 			# Small ornamental border, outside the actual entrance; no invented food.
-			for j: int in range(4):
+			for j: int in range(4 if not blocked.has(at+Vector2i(0,1)) and kind in ["shelter","house","home"] else 0):
 				var edge := base + Vector2(-32+j*5, 12+j*2)
 				batch.draw_line(edge,edge+Vector2(0,-5),Color("65764b"),2)
 				batch.draw_circle(edge+Vector2(0,-5),1.7,Color("c7b880"))
 			var entry: Array = structure.get("entrance", [at.x+1, at.y])
-			var route := entrance_path(Vector2i(int(entry[0]), int(entry[1])), roads, tiles, blocked)
+			var destinations := roads.duplicate()
+			destinations.erase(Vector2i(int(entry[0]),int(entry[1])))
+			var route := entrance_path(Vector2i(int(entry[0]), int(entry[1])), destinations, tiles, blocked)
 			var previous := base + Vector2(15,14)
 			for step: Vector2i in route:
 				var next: Vector2 = renderer.map_to_local(step)

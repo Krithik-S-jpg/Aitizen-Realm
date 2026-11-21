@@ -26,8 +26,8 @@ func _run() -> void:
 			if terrain == "forest" and (x * 13 + y * 7) % 7 == 0:
 				resources.append({"id":"tree-%d-%d"%[x,y],"x":x,"y":y,"type":"tree","growth":0.5+float(y%5)*0.1,"variant":y%3})
 	var structures: Array = []
-	for i: int in range(3):
-		structures.append({"id":"home%d"%i,"x":16+i*2,"y":12+i,"structure_type":"shelter","completed":true})
+	for location: Vector2i in [Vector2i(16,12),Vector2i(20,12),Vector2i(20,17)]:
+		structures.append({"id":str(location),"x":location.x,"y":location.y,"structure_type":"shelter","completed":true,"entrance":[location.x+1,location.y],"footprint":[[location.x,location.y],[location.x-1,location.y],[location.x,location.y-1],[location.x-1,location.y-1]]})
 	structures.append({"id":"fire","x":17,"y":16,"structure_type":"campfire","completed":true,"fuel":10})
 	var entities: Array = []
 	for i: int in range(4):

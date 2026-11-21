@@ -1719,6 +1719,7 @@ class DecisionService:
             for resource in world.resources.values()
             if not resource.depleted or resource.visual_state in {"fallen", "stump"}
         }
+        candidates = []
         for radius in range(1, 5):
             ring = [
                 (entity.x + dx, entity.y + dy)
@@ -1743,7 +1744,23 @@ class DecisionService:
                         ConstructionService.validate_space(world, structure_type or StructureType.SHELTER, x, y)
                     except ValueError:
                         continue
-                    return x, y
+                    candidates.append((x, y))
+        if candidates:
+            # Prefer a settlement edge over scattered isolated construction.
+            # Collision validation above still reserves foundations and entrances.
+            known = world.entity_knowledge.get(str(entity.id))
+            anchors = [s for s in world.structures.values() if s.completed
+                       and known and str(s.id) in known.structures
+                       and s.structure_type not in {StructureType.FENCE, StructureType.TORCH}]
+            def score(point):
+                x, y = point
+                preferred = [s for s in anchors if s.structure_type in (
+                    {StructureType.STORAGE, StructureType.WORKBENCH} if structure_type == StructureType.WORKBENCH
+                    else {StructureType.SHELTER, StructureType.TENT, StructureType.WELL, StructureType.CAMPFIRE})]
+                distance = min((abs(s.x-x)+abs(s.y-y) for s in preferred or anchors), default=4)
+                # Never trade a longer supply trip for visual clustering.
+                return (max(abs(x-entity.x), abs(y-entity.y)), entity.distance_squared_to(x,y), abs(distance-4), point)
+            return min(candidates, key=score)
         raise ValueError("No nearby vacant construction tile is available.")
 
     @staticmethod

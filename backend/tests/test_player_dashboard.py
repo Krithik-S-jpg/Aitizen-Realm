@@ -24,6 +24,14 @@ def test_dashboard_scopes_map_and_chat(monkeypatch):
     assert 'Talk to your citizen' in response.text
     assert '&lt;Alice&gt;' in response.text
     assert 'PRIVATE' not in response.text
+    live = client.get('/account/status?details=1&entity_id='+str(other.id)).json()
+    assert live['citizen']['name'] == own.name
+    assert live['citizen']['needs']['health'] == 100
+    assert 'PRIVATE' not in str(live)
+    own.needs.health = 42
+    assert client.get('/account/status?details=1').json()['citizen']['needs']['health'] == 42
+    own.needs.health = 100
+    assert 'Follow my citizen' in response.text
     response=client.get('/account/view?entity_id='+str(other.id))
     assert 'Health 100/100' in response.text
     assert '&lt;Alice&gt;' in response.text

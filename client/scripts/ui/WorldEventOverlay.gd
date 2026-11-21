@@ -69,7 +69,7 @@ func _add_event(event: Dictionary) -> void:
 	var card := Button.new()
 	card.custom_minimum_size = Vector2(336, 72)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
-	card.focus_mode = Control.FOCUS_NONE
+	card.focus_mode = Control.FOCUS_ALL
 	card.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	card.text = "%s   %s\n      %s   ·   T%05d" % [
@@ -100,12 +100,16 @@ func _add_event(event: Dictionary) -> void:
 		oldest.queue_free()
 	card.modulate.a = 0.0
 	card.position.x = -360.0
+	var reduced := preload("res://scripts/ui/AtlasTheme.gd").reduced_motion
+	if reduced:
+		card.position.x = 0.0
+		card.modulate.a = 1.0
 	var tween := card.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
-	tween.tween_property(card, "modulate:a", 1.0, 0.2)
-	tween.tween_property(card, "position:x", 0.0, 0.3)
+	tween.tween_property(card, "modulate:a", 1.0, 0.0 if reduced else 0.2)
+	tween.tween_property(card, "position:x", 0.0, 0.0 if reduced else 0.3)
 	var expiry := card.create_tween()
-	expiry.tween_interval(4.65)
-	expiry.tween_property(card, "position:x", -360.0, 0.35)
+	expiry.tween_interval(8.0 if str(event.get("severity","")) in ["danger","warning"] else 5.0)
+	expiry.tween_property(card, "position:x", 0.0 if reduced else -360.0, 0.35)
 	expiry.parallel().tween_property(card, "modulate:a", 0.0, 0.35)
 	expiry.tween_callback(slot.queue_free)
 

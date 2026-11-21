@@ -84,4 +84,13 @@ async def status(request):
     joined = entity is not None
     accepting = bool(world.shared_world.accepting_players)
     label = ('Citizen active' if entity.active else 'Citizen inactive') if joined else ('Ready to join' if accepting else 'World closed to new players')
-    return JSONResponse({'loaded': True, 'joined': joined, 'accepting': accepting, 'status': label}, headers=headers)
+    payload = {'loaded': True, 'joined': joined, 'accepting': accepting, 'status': label}
+    if joined and request.query_params.get('details') == '1':
+        action = world.actions.get(world.active_actions.get(str(entity.id), ''))
+        payload['citizen'] = {
+            'name': entity.name, 'avatar': entity.avatar_id.value,
+            'activity': action.action_type.value.replace('_', ' ').title() if action else str(entity.metadata.get('state', 'Idle')).replace('_', ' ').title(),
+            'needs': {key: max(0, min(100, float(getattr(entity.needs, key)))) for key in ('health', 'energy', 'hunger', 'thirst')} if entity.needs else {},
+            'memories': len(world.episodes.get(str(entity.id), [])),
+        }
+    return JSONResponse(payload, headers=headers)

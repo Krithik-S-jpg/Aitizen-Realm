@@ -20,7 +20,7 @@ def panels(user, world, entity):
         if other is None:
             continue
         label = 'Friend' if bond.trust >= .35 and bond.familiarity >= .25 else 'Strained' if bond.trust < 0 else 'Acquaintance'
-        cards.append('<article class="relationship"><strong>'+esc(other.name)+'</strong><span class="badge">'+label+'</span><p class="muted">Familiarity '+str(round(bond.familiarity*100))+'% · Trust '+str(round(bond.trust*100))+'%</p><small class="muted">'+str(bond.interactions)+' recorded interactions · Tick '+str(bond.last_interaction_tick)+'</small></article>')
+        cards.append('<article class="relationship"><img class="bond-portrait" loading="lazy" src="/account/portrait/'+esc(other.avatar_id.value)+'" alt=""><strong>'+esc(other.name)+'</strong><span class="badge">'+label+'</span><p class="muted">Familiarity '+str(round(bond.familiarity*100))+'% · Trust '+str(round(bond.trust*100))+'%</p><small class="muted">'+str(bond.interactions)+' recorded interactions · Tick '+str(bond.last_interaction_tick)+'</small></article>')
         if len(cards) >= 12:
             break
     return timeline + '<section class="panel" id="relationships"><span class="eyebrow">People they know</span><h2>Relationships</h2><p class="muted">Your citizen’s recorded perspective</p>'+(''.join(cards) or '<p class="empty">Relationships appear after social encounters.</p>')+'</section>'

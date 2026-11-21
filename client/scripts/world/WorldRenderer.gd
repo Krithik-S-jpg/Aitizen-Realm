@@ -1626,9 +1626,9 @@ func _buildable_region(kind: String) -> Rect2:
 
 func _buildable_destination(base: Vector2, kind: String, source: Rect2) -> Rect2:
 	var height: float = {
-		"shelter": 140.0, "house": 140.0, "home": 140.0,
-		"tent": 106.0, "storage": 110.0, "campfire": 48.0,
-		"workbench": 65.0, "well": 84.0, "farm": 62.0, "fence": 54.0
+		"shelter": 124.0, "house": 124.0, "home": 124.0,
+		"tent": 90.0, "storage": 96.0, "campfire": 32.0,
+		"workbench": 43.0, "well": 62.0, "farm": 54.0, "fence": 35.0
 	}.get(kind, 82.0) as float
 	var width := height * source.size.x / maxf(source.size.y, 1.0)
 	return Rect2(base + Vector2(-width * 0.5, -height + 8.0), Vector2(width, height))
@@ -1742,10 +1742,7 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 	var weather_shiver := sin(_visual_seconds * 18.0 + tile_center.x) * 0.8 if _temperature_c < 3.0 else 0.0
 	# Wind may animate foliage; grounded animals must not slide off their feet.
 	var base := tile_center + Vector2(weather_shiver, 5.0 + bob)
-	draw_colored_polygon(PackedVector2Array([
-		base + Vector2(-width * 0.28, -2), base + Vector2(0, -6),
-		base + Vector2(width * 0.28, -2), base + Vector2(0, 3)
-	]), Color(0.0, 0.0, 0.0, 0.22))
+	NaturalDetails.shadow(self,tile_center,width*.28,_draw_detail_level)
 	draw_set_transform(base, 0.0, Vector2(float(_entity_facing.get(entity_id, 1.0)), 1.0))
 	draw_texture_rect_region(
 		animal_atlas,
@@ -1871,16 +1868,14 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 		phase = float(_entity_stride_distances.get(entity_key, 0.0)) / 40.0 * 0.8
 	# Keep the walking cycle while carrying; the carry atlas has only one pose.
 	var working := action in ["chop", "gather", "pluck", "mine", "build", "craft"]
-	var bob := 0.0 if action == "sleep" else sin(phase * (1.8 if working else 0.65)) * (1.8 if working else 0.6)
+	# Resting feet remain grounded; walking phase follows measured distance.
+	var bob := sin(phase * 1.8) * .65 if working else 0.0
 	var weather_shiver := sin(_visual_seconds * 19.0 + tile_center.y) * 0.75 if _temperature_c < 3.0 else 0.0
 	var base := tile_center + Vector2(weather_shiver, 3 + bob)
 	var is_player: bool = "player" in entity.get("tags", [])
 	var accent := Color("5de4c1") if is_player else Color("e0b868")
 	# The source sprite supplies the character; code adds only world-space feedback.
-	draw_colored_polygon(PackedVector2Array([
-		base + Vector2(0, -2), base + Vector2(13, 2),
-		base + Vector2(0, 7), base + Vector2(-13, 2)
-	]), Color(0.0, 0.0, 0.0, 0.28))
+	NaturalDetails.shadow(self,tile_center,13,_draw_detail_level)
 	var facing := float(_entity_facing.get(entity_key, 1.0))
 	if working and action_target.has("x") and action_target.has("y"):
 		var contact := map_to_local(Vector2i(int(action_target["x"]), int(action_target["y"])))

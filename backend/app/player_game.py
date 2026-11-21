@@ -4,7 +4,7 @@ from starlette.responses import JSONResponse
 
 # Explicit visual fields: never forward arbitrary citizen metadata or private chats.
 VISUAL = set('id name kind x y avatar_id visual_avatar life_stage gender action action_progress action_target route route_status indoors sleep_home_position travel_mode underwater care_animation teaching_animation carried_by infant_carried_by carrying_infant carrying_casualty carried_avatar'.split())
-METADATA = set('species state in_cave anchored home marine'.split())
+METADATA = set('species state in_cave cave_id cave_position cave_animal cave_prepared anchored home marine altitude'.split())
 
 
 def entity_view(entity, world, own):
