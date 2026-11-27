@@ -230,6 +230,7 @@ class World(BaseModel):
     shared_world: SharedWorldSettings = Field(default_factory=SharedWorldSettings)
     marine_initialized: bool = False
     caves_initialized: bool = False
+    elevation_version: int = 0
     expeditions: dict[str, dict[str, Any]] = Field(default_factory=dict)
     secrets_initialized: bool = False
     hydrology: dict[str, Any] = Field(default_factory=dict)

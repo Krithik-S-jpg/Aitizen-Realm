@@ -1,6 +1,7 @@
 """Knowledge-constrained A-star routing and tick-controlled movement."""
 
 import heapq
+from app.application.services.terrain_elevation import can_step
 from collections import deque
 from uuid import UUID
 
@@ -118,8 +119,10 @@ class NavigationService:
                         entity.metadata["care_status"] = "Waiting safely for guardian"
                         continue
             tile = world.retrieve_tile(next_x, next_y)
+            from app.application.services.terrain_elevation import can_step
             if (
                 tile is None
+                or not can_step(world, (entity.x,entity.y), (next_x,next_y))
                 or (
                     not tile.walkable and not self._can_enter_water(world, entity, tile)
                 )
@@ -268,6 +271,9 @@ class NavigationService:
                     current = parents[current]
                 return list(reversed(path))
             for nx, ny in self._neighbors(current[:2]):
+                from app.application.services.terrain_elevation import can_step
+                if not can_step(world,current[:2],(nx,ny)):
+                    continue
                 tile = world.retrieve_tile(nx, ny)
                 if f"{nx},{ny}" not in knowledge.tiles or tile is None:
                     continue
@@ -463,6 +469,7 @@ class NavigationService:
                         and known
                         and f"{neighbor[0]},{neighbor[1]}" in known.tiles
                         and MarineService.wet(world.retrieve_tile(*neighbor))
+                        and can_step(world,point,neighbor)
                         and not self._structure_blocks(world, *neighbor)
                     ):
                         parents[neighbor] = point
@@ -578,6 +585,9 @@ class NavigationService:
             if current == goal:
                 return self._reconstruct(came_from, goal)
             for neighbor in self._neighbors(current):
+                from app.application.services.terrain_elevation import can_step
+                if not can_step(world,current,neighbor):
+                    continue
                 key = f"{neighbor[0]},{neighbor[1]}"
                 tile = world.retrieve_tile(*neighbor)
                 if (

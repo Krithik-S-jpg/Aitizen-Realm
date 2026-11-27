@@ -1,6 +1,8 @@
 """Species-specific deterministic wildlife behavior."""
 
 import json
+from app.application.services.terrain_elevation import can_step
+
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -877,6 +879,7 @@ class AnimalService:
             (animal.x + dx, animal.y + dy)
             for dx, dy in ordered
             if self._can_enter(world, animal.x + dx, animal.y + dy)
+            and can_step(world,(animal.x,animal.y),(animal.x+dx,animal.y+dy))
         ]
         preferred = [
             position
@@ -911,7 +914,8 @@ class AnimalService:
             axis_steps.reverse()
         candidates.extend(axis_steps)
         for x, y in candidates:
-            if (x, y) != (animal.x, animal.y) and self._can_enter(world, x, y):
+            from app.application.services.terrain_elevation import can_step
+            if (x, y) != (animal.x, animal.y) and self._can_enter(world, x, y) and can_step(world,(animal.x,animal.y),(x,y)):
                 animal.x = x
                 animal.y = y
                 self._set_state(animal, state, tick)
@@ -925,7 +929,7 @@ class AnimalService:
             position, first_step = frontier.popleft()
             for ox, oy in ((1, 0), (0, 1), (-1, 0), (0, -1)):
                 neighbour = (position[0] + ox, position[1] + oy)
-                if neighbour in visited or not self._can_enter(world, *neighbour):
+                if neighbour in visited or not self._can_enter(world, *neighbour) or not can_step(world,position,neighbour):
                     continue
                 visited.add(neighbour)
                 step = neighbour if position == start else first_step

@@ -72,6 +72,7 @@ var _speech_style: StyleBoxFlat
 const CohesiveArt = preload("res://scripts/world/CohesiveArt.gd")
 var _resource_atlas: Texture2D
 const NaturalDetails = preload("res://scripts/world/NaturalDetails.gd")
+const Elevation = preload("res://scripts/world/ElevationVisuals.gd")
 
 func _cache_water_profiles() -> void:
 	_water_profiles.clear()
@@ -444,6 +445,7 @@ var _wind_direction := 0.0
 var _temperature_c := 18.0
 var _is_dynamic_layer := false
 var _dynamic_layer: WorldRenderer
+var _elevated_scenery := {}
 var _scenery_mesh: MeshInstance2D
 var _scenery_signature := 0
 var _structure_scenery_signature := 0
@@ -804,14 +806,31 @@ func get_resource_at(map_position: Vector2i) -> Dictionary:
 func map_to_local(map_position: Vector2i) -> Vector2:
 	return Vector2(
 		float(map_position.x - map_position.y) * tile_width * 0.5,
-		float(map_position.x + map_position.y) * tile_height * 0.5
+		float(map_position.x + map_position.y) * tile_height * 0.5 - _surface_height(Vector2(map_position))
 	)
 
 
 func local_to_map(local_position: Vector2) -> Vector2i:
 	var map_x := local_position.x / tile_width + local_position.y / tile_height
 	var map_y := local_position.y / tile_height - local_position.x / tile_width
-	return Vector2i(roundi(map_x), roundi(map_y))
+	var found := Vector2i(roundi(map_x), roundi(map_y))
+	var depth := -INF
+	for height: int in range(5):
+		var candidate := Vector2i(roundi(map_x+height*Elevation.STEP/tile_height),roundi(map_y+height*Elevation.STEP/tile_height))
+		if _tiles.has(candidate) and Geometry2D.is_point_in_polygon(local_position,_diamond_at(map_to_local(candidate))) and candidate.x+candidate.y > depth:
+			found = candidate
+			depth = candidate.x+candidate.y
+	return found
+
+func _surface_height(at: Vector2) -> float:
+	if cave_view or underwater_view:
+		return 0.0
+	var origin := Vector2i(floori(at.x),floori(at.y))
+	var fraction := at-Vector2(origin)
+	return lerpf(lerpf(Elevation.level(_tiles,origin),Elevation.level(_tiles,origin+Vector2i(1,0)),fraction.x),lerpf(Elevation.level(_tiles,origin+Vector2i(0,1)),Elevation.level(_tiles,origin+Vector2i(1,1)),fraction.x),fraction.y)*Elevation.STEP
+
+func ground_to_local(at: Vector2i) -> Vector2:
+	return map_to_local(at)+Vector2(0,(Elevation.level(_tiles,at)-Elevation.ground_level(_tiles,at))*Elevation.STEP if not cave_view and not underwater_view else 0)
 
 
 func set_hovered_tile(map_position: Vector2i) -> void:
@@ -882,7 +901,7 @@ func _draw() -> void:
 	for coordinate: Vector2i in _ordered_coordinates:
 		if _is_dynamic_layer and not _water_profiles.has(coordinate) and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
 			continue
-		var tile_position := map_to_local(coordinate)
+		var tile_position := ground_to_local(coordinate)
 		if not _is_on_screen(tile_position, 400.0 if _mountain_profiles.has(coordinate) else 100.0):
 			continue
 		if _is_dynamic_layer:
@@ -903,6 +922,9 @@ func _draw() -> void:
 
 	# Sort all upright objects together by their ground contact point.
 	var objects: Array[Dictionary] = []
+	for coordinate: Vector2i in _ordered_coordinates:
+		if Elevation.ground_level(_tiles,coordinate) > 0:
+			objects.append({"kind":"terrace","data":{"x":coordinate.x,"y":coordinate.y,"id":"ground"},"base":ground_to_local(coordinate)})
 	for resource: Dictionary in _ordered_resources:
 		objects.append({"kind": "resource", "data": resource, "base": map_to_local(Vector2i(resource.x, resource.y))})
 	for structure: Dictionary in _ordered_structures:
@@ -913,13 +935,24 @@ func _draw() -> void:
 		objects.append({"kind": "entity", "data": entity, "base": _map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO))})
 	for coordinate: Vector2i in _ordered_coordinates:
 		if not _tiles[coordinate].get("metadata", {}).get("cave", {}).is_empty():
-			objects.append({"kind":"entrance", "data":{"id":"cave-%s"%coordinate}, "base":map_to_local(coordinate)})
+			objects.append({"kind":"entrance", "data":{"id":"cave-%s"%coordinate,"x":coordinate.x,"y":coordinate.y}, "base":map_to_local(coordinate)})
 	objects = objects.filter(func(item: Dictionary) -> bool: return _is_on_screen(item.base, 180.0))
+	for item: Dictionary in objects:
+		var at := Vector2(float(item.data.x),float(item.data.y))
+		if item.kind == "entity":
+			at = _entity_visual_positions.get(str(item.data.id),at)
+		item.sort_y = (at.x+at.y)*tile_height*.5 - (.1 if item.kind == "terrace" else 0)
 	objects.sort_custom(_sort_ground_objects)
 	for object: Dictionary in objects:
 		if not _is_on_screen(object.base, 180.0):
 			continue
 		match object.kind:
+			"terrace":
+				var at := Vector2i(int(object.data.x),int(object.data.y))
+				Elevation.faces(self,at,object.base)
+				_draw_terrain_sprite(object.base,str(_tiles[at].get("terrain","grass")).to_lower(),int(_tiles[at].get("metadata",{}).get("variant",0)),at)
+				if _elevated_scenery.has(at):
+					draw_mesh(_elevated_scenery[at],null)
 			"resource": _draw_depth_resource(object.data)
 			"structure": _draw_structure(object.base, object.data)
 			"entity": _draw_depth_entity(object.data)
@@ -930,8 +963,10 @@ func _draw() -> void:
 
 
 func _sort_ground_objects(a: Dictionary, b: Dictionary) -> bool:
-	if not is_equal_approx(a.base.y, b.base.y):
-		return a.base.y < b.base.y
+	var a_depth := float(a.get("sort_y",a.base.y))
+	var b_depth := float(b.get("sort_y",b.base.y))
+	if not is_equal_approx(a_depth, b_depth):
+		return a_depth < b_depth
 	if not is_equal_approx(a.base.x, b.base.x):
 		return a.base.x < b.base.x
 	return str(a.data.get("id", "")) < str(b.data.get("id", ""))
@@ -2015,7 +2050,7 @@ func _draw_work_feedback(entity: Dictionary, action: String, phase: float) -> vo
 func _map_vector_to_local(map_position: Vector2) -> Vector2:
 	return Vector2(
 		(map_position.x - map_position.y) * tile_width * 0.5,
-		(map_position.x + map_position.y) * tile_height * 0.5
+		(map_position.x + map_position.y) * tile_height * 0.5 - _surface_height(map_position)
 	)
 
 
@@ -2328,7 +2363,7 @@ func _rebuild_terrain_mesh() -> void:
 		var region: Array = _terrain_sprite_regions.get(aliases.get(terrain, terrain), [])
 		if region.size() != 4 or _environment_atlas == null:
 			ground.a = 0.0
-		var diamond := _diamond_at(map_to_local(coordinate))
+		var diamond := _diamond_at(ground_to_local(coordinate))
 		var vertex_start := vertices.size()
 		var shift := posmod(coordinate.x * 17 + coordinate.y * 31 + int(data.get("metadata", {}).get("variant", 0)), 4)
 		for index: int in range(4):
@@ -2396,7 +2431,9 @@ func _rebuild_scenery() -> void:
 		_scenery_mesh = MeshInstance2D.new()
 		_scenery_mesh.z_index = -1
 		add_child(_scenery_mesh)
-	_scenery_mesh.mesh = NaturalDetails.build(self, _ordered_coordinates, _tiles, _resources, _structures, TERRAIN_COLORS, _quality_detail_cap)
+	_scenery_mesh.mesh = NaturalDetails.build(self, _ordered_coordinates, _tiles, _resources, _structures, TERRAIN_COLORS, _quality_detail_cap, _elevated_scenery)
+	if _dynamic_layer != null:
+		_dynamic_layer._elevated_scenery = _elevated_scenery
 	_scenery_mesh.visible = not (cave_view or underwater_view)
 
 

@@ -70,6 +70,11 @@ class ConstructionService:
             StructureType.ROAD, StructureType.FARM, StructureType.CAMPFIRE, StructureType.TORCH} else set())
         solid = {(r.x, r.y) for r in world.resources.values() if not r.depleted
                  and r.resource_type in {ResourceType.TREE, ResourceType.STONE, ResourceType.ORE}}
+        from app.application.services.terrain_elevation import level
+        if len({level(world.retrieve_tile(*point)) for point in reserved}) > 1:
+            raise ValueError("Foundations and doorways must share a level terrace.")
+        if any(world.retrieve_tile(*p) and world.retrieve_tile(*p).metadata.get("ramps") for p in footprint):
+            raise ValueError("Keep terrace ramps clear of foundations.")
         for point in reserved:
             tile = world.retrieve_tile(*point)
             if not tile or not tile.walkable or tile.metadata.get("cave"):
@@ -102,6 +107,9 @@ class ConstructionService:
             dry = [b is not None and b.walkable and b.terrain not in {TerrainType.WATER, TerrainType.OCEAN} for b in banks]
             if tile.terrain != TerrainType.WATER or not ((dry[0] and dry[1]) or (dry[2] and dry[3])):
                 raise ValueError("A bridge requires a narrow freshwater crossing with opposite dry banks.")
+            from app.application.services.terrain_elevation import level
+            if not any(dry[i] and dry[i+1] and level(banks[i]) == level(banks[i+1]) for i in (0,2)):
+                raise ValueError("Bridge banks must have matching elevations.")
         elif not tile.walkable:
             raise ValueError("Structures require walkable terrain.")
         if any(
@@ -174,8 +182,15 @@ class ConstructionService:
             raise ValueError("Construction site is waiting for delivered materials.")
         structure.apply_work(amount)
         if structure.completed and structure.structure_type == StructureType.BRIDGE:
-            tile = self._require_world().retrieve_tile(structure.x, structure.y)
+            world = self._require_world()
+            tile = world.retrieve_tile(structure.x, structure.y)
             tile.walkable = True
+            from app.application.services.terrain_elevation import level
+            for dx,dy in ((1,0),(0,1)):
+                a,b = world.retrieve_tile(tile.x-dx,tile.y-dy),world.retrieve_tile(tile.x+dx,tile.y+dy)
+                if a and b and a.walkable and b.walkable and level(a)==level(b):
+                    tile.metadata["bridge_level"] = level(a)
+                    break
         return structure
 
     def blueprints(self) -> dict[str, dict[str, object]]:

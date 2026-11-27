@@ -113,6 +113,8 @@ class WorldGenerator:
         logger.info("Seeded terrain world generated successfully.")
         from app.application.services.hydrology import carve_river
         carve_river(world)
+        from app.application.services.terrain_elevation import initialize as elevate
+        elevate(world)
         from app.application.services.world_secrets import initialize
         initialize(world)
         return world
@@ -156,6 +158,10 @@ class WorldGenerator:
                 resource = cls._resource_for_tile(x, y, terrain, world.seed)
                 if resource is not None:
                     world.add_resource(resource)
+
+        if world.elevation_version:
+            from app.application.services.terrain_elevation import initialize as elevate
+            elevate(world)
 
     @classmethod
     def _resource_for_tile(

@@ -39,6 +39,9 @@ def carve_river(world):
     while outlet is not None:
         channel.add(outlet)
         tile = world.retrieve_tile(*outlet)
+        upstream = parent[outlet]
+        if upstream is not None:
+            world.retrieve_tile(*upstream).metadata["flow_to"] = list(outlet)
         if tile.terrain != TerrainType.OCEAN:
             tile.terrain, tile.walkable = TerrainType.WATER, False
             tile.metadata["river"] = True

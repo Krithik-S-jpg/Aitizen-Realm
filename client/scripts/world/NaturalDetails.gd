@@ -50,6 +50,13 @@ static func ground(canvas, coordinate: Vector2i, tiles: Dictionary, diamond: Pac
 			var tint: Color = palette.get(other, Color("76816c"))
 			tint.a = 0.27 if other not in WET else 0.18
 			edge_band(canvas, diamond[edge], diamond[(edge + 1) % 4], center, tint, 0.44)
+			if other in ["water","ocean"] and detail > 0 and terrain in ["grass","forest","sand","meadow"]:
+				var bank := diamond[edge].lerp(diamond[(edge+1)%4],.35+float(seed%4)*.1).lerp(center,.23)
+				canvas.draw_circle(bank,5,Color(.25,.32,.18,.16))
+				for reed: int in range(3):
+					var stem := bank+Vector2(reed*3-3,reed%2)
+					canvas.draw_line(stem,stem+Vector2(reed-1,-5-reed*2),Color("6c7950"),1.3)
+					canvas.draw_line(stem+Vector2(0,-2),stem+Vector2(4-reed,-5),Color("84915e"),1)
 	if terrain == "mountain" or (terrain in ["grass","stone","snow"] and OFFSETS.any(func(offset: Vector2i) -> bool: return str(tiles.get(coordinate+offset,{}).get("terrain","")).to_lower() == "mountain")):
 		for j: int in range(3):
 			var point := center + Vector2(-13+j*12, (seed+j)%7-3)
@@ -87,7 +94,15 @@ class GroundBatch:
 	extends RefCounted
 	var vertices := PackedVector3Array()
 	var colors := PackedColorArray()
+	var cell := Vector2i.ZERO
+	var raised := {}
+	var buckets := {}
 	func draw_polygon(points: PackedVector2Array, tint: PackedColorArray) -> void:
+		if raised.has(cell):
+			if not buckets.has(cell):
+				buckets[cell] = GroundBatch.new()
+			buckets[cell].draw_polygon(points,tint)
+			return
 		for i: int in range(1, points.size() - 1):
 			for k: int in [0, i, i + 1]:
 				vertices.append(Vector3(points[k].x, points[k].y, 0))
@@ -133,16 +148,25 @@ static func entrance_path(start: Vector2i, roads: Dictionary, tiles: Dictionary,
 			var tile: Dictionary = tiles.get(next, {})
 			if tile.is_empty() or str(tile.get("terrain", "")).to_lower() in WET or not bool(tile.get("walkable", true)):
 				continue
+			var here: Dictionary = tiles.get(point,{}).get("metadata",{})
+			var there: Dictionary = tile.get("metadata",{})
+			if int(here.get("terrace",0)) != int(there.get("terrace",0)) and [next.x,next.y] not in here.get("ramps",[]) and [point.x,point.y] not in there.get("ramps",[]):
+				continue
 			parents[next] = point
 			pending.append(next)
 	return []
 
-static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resources: Array, structures: Array, palette: Dictionary, detail: int) -> ArrayMesh:
+static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resources: Array, structures: Array, palette: Dictionary, detail: int, elevated: Dictionary = {}) -> ArrayMesh:
 	var batch := GroundBatch.new()
+	elevated.clear()
+	for at: Vector2i in coordinates:
+		if int(tiles[at].get("metadata",{}).get("terrace",0)) > 0:
+			batch.raised[at] = true
 	if detail == 0:
 		return batch.mesh()
 	for coordinate: Vector2i in coordinates:
-		ground(batch, coordinate, tiles, renderer._diamond_at(renderer.map_to_local(coordinate)), palette, detail)
+		batch.cell = coordinate
+		ground(batch, coordinate, tiles, renderer._diamond_at(renderer.ground_to_local(coordinate)), palette, detail)
 	var tree_cells := {}
 	for resource: Dictionary in resources:
 		if str(resource.get("type", "")) == "tree":
@@ -152,6 +176,7 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 		var coordinate := Vector2i(int(resource.get("x",0)),int(resource.get("y",0)))
 		if kind not in ["tree", "bush", "stone"] or not renderer._is_coordinate_visible(coordinate):
 			continue
+		batch.cell = coordinate
 		var radius := 23.0 if kind == "tree" else 10.0
 		var base: Vector2 = renderer.map_to_local(coordinate) + Vector2(radius * 0.22, 4)
 		if kind == "tree":
@@ -192,6 +217,7 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 			continue
 		var base: Vector2 = renderer.map_to_local(at) + Vector2(0,2)
 		var kind := str(structure.get("structure_type", "")).to_lower()
+		batch.cell = at
 		foundation(batch,base,kind,detail)
 		if kind in ["shelter", "house", "home", "tent", "storage", "workbench", "well"]:
 			# Small ornamental border, outside the actual entrance; no invented food.
@@ -205,10 +231,12 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 			var route := entrance_path(Vector2i(int(entry[0]), int(entry[1])), destinations, tiles, blocked)
 			var previous := base + Vector2(15,14)
 			for step: Vector2i in route:
+				batch.cell = step
 				var next: Vector2 = renderer.map_to_local(step)
 				batch.draw_line(previous, next, Color(0.58,0.50,0.34,0.35), 10)
 				previous = next
 
+		batch.cell = at
 		if kind in ["shelter","storage","tent","workbench"]:
 			batch.draw_circle(base + Vector2(6,4),34,Color(0.05,0.10,0.09,0.12))
 			for i: int in range(3):
@@ -218,4 +246,6 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 			for i: int in range(mini(4,int(float(items.get("wood",0))/5))):
 				var log_at := base+Vector2(-32,4-i*3)
 				batch.draw_line(log_at,log_at+Vector2(12,-5),Color("806047"),3)
+	for at: Vector2i in batch.buckets:
+		elevated[at] = batch.buckets[at].mesh()
 	return batch.mesh()

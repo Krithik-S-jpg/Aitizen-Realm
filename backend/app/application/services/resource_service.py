@@ -168,6 +168,9 @@ class ResourceService:
             raise LookupError("Active actor entity does not exist.")
         if actor.distance_squared_to(resource.x, resource.y) > 2:
             raise ValueError("Actor must stand on or beside the resource.")
+        from app.application.services.terrain_elevation import can_step
+        if not can_step(world,(actor.x,actor.y),(resource.x,resource.y)):
+            raise ValueError("Reach the resource's terrace before harvesting.")
 
     def _resource(self, resource_id: UUID) -> ResourceNode:
         world = self._require_world()
