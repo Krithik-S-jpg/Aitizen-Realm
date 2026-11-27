@@ -445,6 +445,8 @@ var _wind_direction := 0.0
 var _temperature_c := 18.0
 var _is_dynamic_layer := false
 var _dynamic_layer: WorldRenderer
+var _static_depth_objects: Array[Dictionary] = []
+var _terrain_positions := {}
 var _elevated_scenery := {}
 var _scenery_mesh: MeshInstance2D
 var _scenery_signature := 0
@@ -901,7 +903,7 @@ func _draw() -> void:
 	for coordinate: Vector2i in _ordered_coordinates:
 		if _is_dynamic_layer and not _water_profiles.has(coordinate) and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
 			continue
-		var tile_position := ground_to_local(coordinate)
+		var tile_position: Vector2 = _terrain_positions.get(coordinate,Vector2.ZERO)
 		if not _is_on_screen(tile_position, 400.0 if _mountain_profiles.has(coordinate) else 100.0):
 			continue
 		if _is_dynamic_layer:
@@ -922,22 +924,17 @@ func _draw() -> void:
 
 	# Sort all upright objects together by their ground contact point.
 	var objects: Array[Dictionary] = []
-	for coordinate: Vector2i in _ordered_coordinates:
-		if Elevation.ground_level(_tiles,coordinate) > 0:
-			objects.append({"kind":"terrace","data":{"x":coordinate.x,"y":coordinate.y,"id":"ground"},"base":ground_to_local(coordinate)})
-	for resource: Dictionary in _ordered_resources:
-		objects.append({"kind": "resource", "data": resource, "base": map_to_local(Vector2i(resource.x, resource.y))})
-	for structure: Dictionary in _ordered_structures:
-		objects.append({"kind": "structure", "data": structure, "base": map_to_local(Vector2i(structure.x, structure.y))})
+	for item: Dictionary in _static_depth_objects:
+		if _is_on_screen(item.base,180.0):
+			objects.append(item)
 	for entity: Dictionary in _ordered_entities:
 		var key := str(entity.get("id", "%s,%s" % [entity.x, entity.y]))
 		var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity.x, entity.y))
 		objects.append({"kind": "entity", "data": entity, "base": _map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO))})
-	for coordinate: Vector2i in _ordered_coordinates:
-		if not _tiles[coordinate].get("metadata", {}).get("cave", {}).is_empty():
-			objects.append({"kind":"entrance", "data":{"id":"cave-%s"%coordinate,"x":coordinate.x,"y":coordinate.y}, "base":map_to_local(coordinate)})
 	objects = objects.filter(func(item: Dictionary) -> bool: return _is_on_screen(item.base, 180.0))
 	for item: Dictionary in objects:
+		if item.kind != "entity":
+			continue
 		var at := Vector2(float(item.data.x),float(item.data.y))
 		if item.kind == "entity":
 			at = _entity_visual_positions.get(str(item.data.id),at)
@@ -949,8 +946,9 @@ func _draw() -> void:
 		match object.kind:
 			"terrace":
 				var at := Vector2i(int(object.data.x),int(object.data.y))
-				Elevation.faces(self,at,object.base)
-				_draw_terrain_sprite(object.base,str(_tiles[at].get("terrain","grass")).to_lower(),int(_tiles[at].get("metadata",{}).get("variant",0)),at)
+				if object.get("edge",false):
+					Elevation.faces(self,at,object.base)
+					_draw_terrain_sprite(object.base,str(_tiles[at].get("terrain","grass")).to_lower(),int(_tiles[at].get("metadata",{}).get("variant",0)),at)
 				if _elevated_scenery.has(at):
 					draw_mesh(_elevated_scenery[at],null)
 			"resource": _draw_depth_resource(object.data)
@@ -2320,6 +2318,9 @@ func _rebuild_draw_order() -> void:
 		if _is_coordinate_visible(coordinate):
 			_ordered_coordinates.append(coordinate)
 	_ordered_coordinates.sort_custom(_sort_coordinates)
+	_terrain_positions.clear()
+	for coordinate: Vector2i in _ordered_coordinates:
+		_terrain_positions[coordinate] = ground_to_local(coordinate)
 	if not _is_dynamic_layer:
 		_ordered_resources.clear()
 		_ordered_structures.clear()
@@ -2333,6 +2334,19 @@ func _rebuild_draw_order() -> void:
 		return _is_coordinate_visible(Vector2i(int(structure["x"]), int(structure["y"])))
 	)
 	_ordered_structures.sort_custom(_sort_resources)
+	_static_depth_objects.clear()
+	for coordinate: Vector2i in _ordered_coordinates:
+		var height := Elevation.ground_level(_tiles,coordinate)
+		if height > 0:
+			var edge := height > Elevation.ground_level(_tiles,coordinate+Vector2i(1,0)) or height > Elevation.ground_level(_tiles,coordinate+Vector2i(0,1))
+			if edge:
+				_static_depth_objects.append({"kind":"terrace","edge":edge,"data":{"x":coordinate.x,"y":coordinate.y,"id":"ground"},"base":_terrain_positions[coordinate],"sort_y":(coordinate.x+coordinate.y)*tile_height*.5-.1})
+		if not _tiles[coordinate].get("metadata",{}).get("cave",{}).is_empty():
+			_static_depth_objects.append({"kind":"entrance","data":{"x":coordinate.x,"y":coordinate.y,"id":"cave"},"base":map_to_local(coordinate),"sort_y":(coordinate.x+coordinate.y)*tile_height*.5})
+	for pair: Array in [["resource",_ordered_resources],["structure",_ordered_structures]]:
+		for data: Dictionary in pair[1]:
+			_static_depth_objects.append({"kind":pair[0],"data":data,"base":map_to_local(Vector2i(data.x,data.y)),"sort_y":(float(data.x)+float(data.y))*tile_height*.5})
+
 
 
 func _rebuild_terrain_mesh() -> void:

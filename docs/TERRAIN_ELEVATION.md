@@ -25,3 +25,8 @@ Construction preferences cluster homes near communal anchors and farms near home
 Cliffs have shaded recesses; stairs extend along a slope with visible treads; procedural bridge planks and rails orient to opposite banks at deck height. High terraces receive a restrained aerial tint and shoreline reeds are less repetitive. No new mountain artwork or full distance-fog system was added in this pass.
 
 Validation: 18 tests passed including the settlement-life simulation; Godot cached-scenery regression and elevated preview passed. Hosted browser frame-time testing remains pending.
+
+## Renderer optimization
+Cache terrain positions and static depth records; cull before adding static records to the per-frame sort. Plateau interiors use the static terrain/scenery meshes; only exposed terrace edges are redrawn in the occlusion queue. Regression check passed.
+
+Desktop GL Compatibility benchmark: elevated 64x64 fixture, 520 resources, 48 entities, 1152x648 on Intel UHD. Final run 50.8 FPS, median 17.31 ms, p95 31.38 ms, worst 38.70 ms, 186 draw calls. The benchmark exited 1 because its performance target was not met. Earlier intermediate run: 27.2 FPS and 723 calls, but preview activity overlapped that run, so this is not a controlled speedup measurement. Not a hosted-browser result.

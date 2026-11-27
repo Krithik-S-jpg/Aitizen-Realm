@@ -164,7 +164,8 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 	var batch := GroundBatch.new()
 	elevated.clear()
 	for at: Vector2i in coordinates:
-		if int(tiles[at].get("metadata",{}).get("terrace",0)) > 0:
+		var height := int(tiles[at].get("metadata",{}).get("terrace",0))
+		if height > 0 and (height > int(tiles.get(at+Vector2i(1,0),{}).get("metadata",{}).get("terrace",0)) or height > int(tiles.get(at+Vector2i(0,1),{}).get("metadata",{}).get("terrace",0))):
 			batch.raised[at] = true
 	if detail == 0:
 		return batch.mesh()
