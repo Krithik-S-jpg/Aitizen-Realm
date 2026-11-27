@@ -16,3 +16,12 @@ Neighbor-weighted elevation reduces isolated pillars in newly generated terrain.
 
 ## Legacy upgrade and broader landforms
 Elevation is smoothed over a weighted seven-by-seven neighborhood for new terrain. Visual terrace steps are 36 pixels (previously 24). Fifteen focused tests pass, including legacy content preservation, level foundations, traversable land edges and idempotent migration. Live hosted-save verification and FPS measurements remain pending.
+
+## Landscape and crossing pass
+River routing uses a bounded low-frequency bend preference while retaining uphill penalties and a connected drainage route. Occasional shallow pockets vary channel width and resources are cleared from carved water. Forest resource placement uses coherent density patches to form groves and clearings.
+
+Construction preferences cluster homes near communal anchors and farms near homes within the same nearby search radius; they do not relocate existing buildings or create a fixed town plan. Existing doorway paths and stockpile decoration remain. This is not a complete settlement planner.
+
+Cliffs have shaded recesses; stairs extend along a slope with visible treads; procedural bridge planks and rails orient to opposite banks at deck height. High terraces receive a restrained aerial tint and shoreline reeds are less repetitive. No new mountain artwork or full distance-fog system was added in this pass.
+
+Validation: 18 tests passed including the settlement-life simulation; Godot cached-scenery regression and elevated preview passed. Hosted browser frame-time testing remains pending.

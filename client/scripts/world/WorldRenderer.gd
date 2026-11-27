@@ -1539,17 +1539,28 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 	var funded: bool = bool(structure.get("funded", true))
 	var base := tile_center + Vector2(0, 2)
 	var kind := str(structure.get("structure_type", "shelter")).to_lower()
-	if kind == "bridge" and completed and _draw_buildable_sprite(base,kind):
-		return
 	if kind == "bridge":
-		var length := 7 if completed else maxi(1, int(progress * 7))
+		var at := Vector2i(int(structure.x),int(structure.y))
+		var along_x := true
+		for axis: Vector2i in [Vector2i(1,0),Vector2i(0,1)]:
+			var left: Dictionary = _tiles.get(at-axis,{})
+			var right: Dictionary = _tiles.get(at+axis,{})
+			if not left.is_empty() and not right.is_empty() and str(left.get("terrain","")).to_lower() not in ["water","ocean"] and str(right.get("terrain","")).to_lower() not in ["water","ocean"]:
+				along_x = axis.x == 1
+				break
+		var axis := Vector2(tile_width*.5 if along_x else -tile_width*.5,tile_height*.5)
+		var side := Vector2(11, -5.5) if along_x else Vector2(11,5.5)
+		var length := 12 if completed else maxi(1,int(progress*12))
 		for plank: int in range(length):
-			var point := tile_center + Vector2((plank - 3) * 7, (plank - 3) * 3.5 - 5)
-			draw_line(point + Vector2(-12, 6), point + Vector2(12, -6), Color("ad8052"), 6.0)
+			var point := tile_center+axis*(float(plank)/11-.5)
+			draw_line(point-side,point+side,Color("ad8052"),4)
 		if completed:
-			for side: int in [-1, 1]:
-				var offset := Vector2(side * 12, side * -6 - 12)
-				draw_line(tile_center + offset - Vector2(24, 12), tile_center + offset + Vector2(24, 12), Color("65492f"), 3.0)
+			for sign_value: int in [-1,1]:
+				var offset := side*sign_value
+				for post: int in range(3):
+					var foot := tile_center+axis*(float(post)/2-.5)+offset
+					draw_line(foot,foot-Vector2(0,13),Color("68503a"),3)
+				draw_line(tile_center-axis*.5+offset-Vector2(0,11),tile_center+axis*.5+offset-Vector2(0,11),Color("94724c"),3)
 		return
 	if kind == "road":
 		var road_color := Color("a89a79") if completed else Color("6f6655")

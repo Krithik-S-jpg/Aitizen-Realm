@@ -1756,10 +1756,15 @@ class DecisionService:
                 x, y = point
                 preferred = [s for s in anchors if s.structure_type in (
                     {StructureType.STORAGE, StructureType.WORKBENCH} if structure_type == StructureType.WORKBENCH
-                    else {StructureType.SHELTER, StructureType.TENT, StructureType.WELL, StructureType.CAMPFIRE})]
+                    else {StructureType.SHELTER, StructureType.TENT} if structure_type == StructureType.FARM
+                    else {StructureType.WELL, StructureType.CAMPFIRE, StructureType.SHELTER, StructureType.TENT})]
                 distance = min((abs(s.x-x)+abs(s.y-y) for s in preferred or anchors), default=4)
                 # Never trade a longer supply trip for visual clustering.
-                return (max(abs(x-entity.x), abs(y-entity.y)), entity.distance_squared_to(x,y), abs(distance-4), point)
+                # Within the same walking-radius ring, keep a small shared court
+                # around wells/fires and group gardens near homes.
+                center = next((s for s in preferred if s.structure_type in {StructureType.WELL,StructureType.CAMPFIRE}),None)
+                court = int(center is not None and abs(center.x-x)+abs(center.y-y)<3)
+                return (max(abs(x-entity.x), abs(y-entity.y)), court, abs(distance-4), entity.distance_squared_to(x,y), point)
             return min(candidates, key=score)
         raise ValueError("No nearby vacant construction tile is available.")
 

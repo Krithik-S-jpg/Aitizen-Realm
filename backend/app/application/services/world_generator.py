@@ -172,6 +172,9 @@ class WorldGenerator:
         capacity = 0.0
 
         if terrain == TerrainType.FOREST:
+            grove = cls._value_noise(x*.13,y*.13,seed+4073)
+            # Dense groves and open clearings retain the existing resource mix.
+            placement = min(.999,placement + (.18 if grove < .35 else -.08 if grove > .65 else 0))
             if placement < 0.24:
                 resource_type = ResourceType.TREE
                 capacity = 80.0 + cls._random_value(x, y, seed + 4051) * 40.0

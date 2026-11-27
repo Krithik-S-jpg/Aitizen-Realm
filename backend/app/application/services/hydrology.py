@@ -1,5 +1,6 @@
 """Bounded seasonal river simulation. Floods never replace underlying terrain."""
 import heapq
+import math
 
 from app.domain.models.calendar import Season, WeatherType
 from app.domain.models.world import TerrainType
@@ -31,7 +32,10 @@ def carve_river(world):
             if other is None:
                 continue
             uphill = max(0, other.metadata.get("elevation", 0) - tile.metadata.get("elevation", 0))
-            candidate = score + 1 + uphill * 100
+            # Low-frequency channel preference encourages connected bends without
+            # allowing the route to loop or override uphill drainage costs.
+            bend = .35*(1+math.sin(nxt[0]*.31+math.sin(nxt[1]*.24)*2+world.seed%31))
+            candidate = score + 1 + bend + uphill * 100
             if candidate < cost.get(nxt, float("inf")):
                 cost[nxt], parent[nxt] = candidate, pos
                 heapq.heappush(frontier, (candidate, nxt))
@@ -46,7 +50,25 @@ def carve_river(world):
             tile.terrain, tile.walkable = TerrainType.WATER, False
             tile.metadata["river"] = True
         outlet = parent[outlet]
-    world.resources = {k: r for k, r in world.resources.items() if (r.x, r.y) not in channel}
+    # Occasional shallow side pockets vary a narrow channel's width.
+    expanded = set(channel)
+    for x,y in sorted(channel):
+        center = world.retrieve_tile(x,y)
+        center.metadata['water_depth'] = 1.0
+        if (x*13+y*7+world.seed)%9 < 2:
+            options = [world.retrieve_tile(*p) for p in neighbors(x,y) if p not in channel]
+            options = [t for t in options if t and t.terrain not in {TerrainType.WATER,TerrainType.OCEAN}
+                       and t.metadata.get('elevation',0) <= center.metadata.get('elevation',0)+.035]
+            if options:
+                bank = min(options,key=lambda t:(t.metadata.get('elevation',0),t.x,t.y))
+                bank.terrain,bank.walkable = TerrainType.WATER,False
+                bank.metadata.update(river=True,water_depth=.25,flow_to=[x,y])
+                expanded.add((bank.x,bank.y))
+        for nx,ny in neighbors(x,y):
+            bank = world.retrieve_tile(nx,ny)
+            if bank and (nx,ny) not in expanded:
+                bank.metadata['riverbank'] = True
+    world.resources = {k: r for k, r in world.resources.items() if (r.x, r.y) not in expanded}
 
 
 def advance(world, tick, calendar):

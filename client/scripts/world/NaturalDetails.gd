@@ -14,6 +14,10 @@ static func ground(canvas, coordinate: Vector2i, tiles: Dictionary, diamond: Pac
 	var center := (diamond[0] + diamond[2]) * 0.5
 	var seed := posmod(coordinate.x * 73 + coordinate.y * 37, 101)
 	var wet := terrain in WET
+	# Restrained aerial tint makes high distant terrain less visually harsh.
+	var elevation := int(tile.get("metadata",{}).get("terrace",0))
+	if elevation > 1 and detail > 0:
+		canvas.draw_colored_polygon(diamond,Color(.62,.72,.72,(elevation-1)*.012))
 	# Low-frequency variation spans several tiles instead of per-tile noise.
 	if not wet and detail > 0:
 		var variation := sin(coordinate.x * .31 + sin(coordinate.y * .23)) * cos(coordinate.y * .27)
@@ -50,7 +54,7 @@ static func ground(canvas, coordinate: Vector2i, tiles: Dictionary, diamond: Pac
 			var tint: Color = palette.get(other, Color("76816c"))
 			tint.a = 0.27 if other not in WET else 0.18
 			edge_band(canvas, diamond[edge], diamond[(edge + 1) % 4], center, tint, 0.44)
-			if other in ["water","ocean"] and detail > 0 and terrain in ["grass","forest","sand","meadow"]:
+			if other in ["water","ocean"] and detail > 0 and seed < 48 and terrain in ["grass","forest","sand","meadow"]:
 				var bank := diamond[edge].lerp(diamond[(edge+1)%4],.35+float(seed%4)*.1).lerp(center,.23)
 				canvas.draw_circle(bank,5,Color(.25,.32,.18,.16))
 				for reed: int in range(3):

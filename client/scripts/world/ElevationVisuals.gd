@@ -43,6 +43,10 @@ static func faces(renderer, at: Vector2i, center: Vector2) -> void:
 			# Broken sod edge and shaded stone facets soften the perfect tile seam.
 			var seed := posmod(at.x*73+at.y*37+edge*19,101)
 			renderer.draw_line(a+down,b+down,Color(.12,.16,.12,.25),4)
+			# Broad tapered recesses break up the continuous wall face.
+			for crack: int in range(2):
+				var notch := a.lerp(b,.25+crack*.48)
+				renderer.draw_colored_polygon(PackedVector2Array([notch,notch+Vector2(3,drop*STEP*.35),notch+down+Vector2(-2,0),notch+down+Vector2(-5,0)]),Color(.12,.15,.12,.19))
 			for section: int in range(5):
 				var t := float(section)/5.0
 				var left := a.lerp(b,t)
@@ -60,6 +64,11 @@ static func faces(renderer, at: Vector2i, center: Vector2) -> void:
 					var size := 2.0+float((seed+stone)%4)
 					renderer.draw_colored_polygon(PackedVector2Array([foot+Vector2(-size,0),foot+Vector2(-size*.4,-size),foot+Vector2(size*.6,-size*.7),foot+Vector2(size,1),foot+Vector2(0,3)]),Color("85816c"))
 		if [at.x+delta.x,at.y+delta.y] in ramps:
-			for step: int in range(6):
-				var p := a.lerp(b,.5)+Vector2(0,(step+.5)*STEP/6)
-				renderer.draw_line(p-Vector2(7,0),p+Vector2(7,0),Color("b5a98a"),3)
+			var top := a.lerp(b,.5)
+			var bottom: Vector2 = renderer.ground_to_local(at+delta)
+			var side := (b-a).normalized()*9
+			renderer.draw_colored_polygon(PackedVector2Array([top-side,top+side,bottom+side,bottom-side]),Color("8b8067"))
+			for step: int in range(8):
+				var p := top.lerp(bottom,float(step)/8)
+				renderer.draw_line(p-side,p+side,Color("c2b596"),2)
+				renderer.draw_line(p-side+Vector2(0,2),p+side+Vector2(0,2),Color(.20,.23,.18,.3),1)
