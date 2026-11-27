@@ -9,3 +9,5 @@ const BUILDING_HEIGHTS := {
     "storage":96.0,"campfire":32.0,"workbench":43.0,"well":62.0,
     "farm":54.0,"fence":35.0
 }
+
+const WORLD_TINT := Color(1.0,0.99,0.97,1.0)

@@ -456,6 +456,7 @@ var _terrain_mesh_dirty := true
 
 
 func _ready() -> void:
+	self_modulate = preload("res://scripts/world/RealmStyle.gd").WORLD_TINT
 	_load_sprite_atlas_config()
 	set_process(_is_dynamic_layer)
 	if not _is_dynamic_layer:
@@ -948,6 +949,7 @@ func _draw() -> void:
 				var at := Vector2i(int(object.data.x),int(object.data.y))
 				if object.get("edge",false):
 					Elevation.faces(self,at,object.base)
+					Elevation.illustrated(self,at,object.base)
 					_draw_terrain_sprite(object.base,str(_tiles[at].get("terrain","grass")).to_lower(),int(_tiles[at].get("metadata",{}).get("variant",0)),at)
 				if _elevated_scenery.has(at):
 					draw_mesh(_elevated_scenery[at],null)
@@ -2353,6 +2355,7 @@ func _rebuild_terrain_mesh() -> void:
 	_terrain_mesh_dirty = false
 	if _terrain_mesh == null:
 		_terrain_mesh = MeshInstance2D.new()
+		_terrain_mesh.self_modulate = preload("res://scripts/world/RealmStyle.gd").WORLD_TINT
 		_terrain_mesh.z_index = -1
 		var surface_material := ShaderMaterial.new()
 		surface_material.shader = preload("res://scripts/world/TerrainSurface.gdshader")
@@ -2450,6 +2453,7 @@ func _rebuild_scenery() -> void:
 		return
 	if _scenery_mesh == null:
 		_scenery_mesh = MeshInstance2D.new()
+		_scenery_mesh.self_modulate = preload("res://scripts/world/RealmStyle.gd").WORLD_TINT
 		_scenery_mesh.z_index = -1
 		add_child(_scenery_mesh)
 	_scenery_mesh.mesh = NaturalDetails.build(self, _ordered_coordinates, _tiles, _resources, _structures, TERRAIN_COLORS, _quality_detail_cap, _elevated_scenery)

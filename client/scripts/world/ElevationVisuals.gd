@@ -1,5 +1,6 @@
 extends RefCounted
 const STEP := 36.0
+const KIT = preload("res://assets/world/cohesive/terrain-kit-v2.png")
 const Style = preload("res://scripts/world/RealmStyle.gd")
 
 static func level(tiles: Dictionary, at: Vector2i) -> int:
@@ -80,3 +81,33 @@ static func faces(renderer, at: Vector2i, center: Vector2) -> void:
 				var p := top.lerp(bottom,float(step)/8)
 				renderer.draw_line(p-side,p+side,Color("c2b596"),2)
 				renderer.draw_line(p-side+Vector2(0,2),p+side+Vector2(0,2),Color(.20,.23,.18,.3),1)
+
+static func illustrated(renderer,at: Vector2i,center: Vector2) -> void:
+	if renderer._quality_detail_cap == 0:
+		return
+	var height := ground_level(renderer._tiles,at)
+	var dx := height-ground_level(renderer._tiles,at+Vector2i(1,0))
+	var dy := height-ground_level(renderer._tiles,at+Vector2i(0,1))
+	var drop := maxi(dx,dy)
+	if drop <= 0:
+		return
+	var data: Dictionary = renderer._tiles[at]
+	var wet := str(data.get("terrain","")).to_lower() in ["water","ocean"]
+	var piece := -1
+	if wet and ((dx>0 and str(renderer._tiles.get(at+Vector2i(1,0),{}).get("terrain","")).to_lower() in ["water","ocean"]) or (dy>0 and str(renderer._tiles.get(at+Vector2i(0,1),{}).get("terrain","")).to_lower() in ["water","ocean"])):
+		piece = 3 if drop == 1 else 4
+	elif not data.get("metadata",{}).get("ramps",[]).is_empty():
+		piece = 2
+	elif dx>0 and dy>0:
+		piece = 1
+	elif str(data.get("terrain","")).to_lower() == "mountain":
+		piece = 5
+	elif posmod(at.x*13+at.y*7,11)==0:
+		piece = 0
+	if piece < 0:
+		return
+	var cell := Vector2(KIT.get_width()/3.0,KIT.get_height()/2.0)
+	var source := Rect2(Vector2(piece%3,int(piece/3))*cell,cell)
+	var size := Vector2(64,drop*STEP+32)
+	# One atlas sample per selected exposed edge; geometry remains authoritative.
+	renderer.draw_texture_rect_region(KIT,Rect2(center+Vector2(-size.x*.5,-17),size),source)

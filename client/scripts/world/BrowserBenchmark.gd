@@ -23,7 +23,7 @@ func _ready() -> void:
 	var tiles := {}
 	for x: int in range(48):
 		for y: int in range(48):
-			tiles[Vector2i(x,y)] = {"terrain":"water" if x%17 < 3 else "grass","metadata":{}}
+			tiles[Vector2i(x,y)] = {"terrain":"water" if x%17 < 3 else "grass","metadata":{"terrace":mini(3,int(x/12))}}
 	var resources: Array = []
 	for i: int in range(240):
 		resources.append({"id":str(i),"x":(i*17)%48,"y":(i*29 + i/48*7)%48,"type":"tree","growth":0.8,"variant":i%3})
