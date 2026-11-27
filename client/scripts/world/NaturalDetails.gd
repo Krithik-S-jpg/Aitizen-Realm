@@ -14,6 +14,18 @@ static func ground(canvas, coordinate: Vector2i, tiles: Dictionary, diamond: Pac
 	var center := (diamond[0] + diamond[2]) * 0.5
 	var seed := posmod(coordinate.x * 73 + coordinate.y * 37, 101)
 	var wet := terrain in WET
+	var metadata: Dictionary = tile.get("metadata",{})
+	if bool(metadata.get("settlement_square",false)):
+		canvas.draw_colored_polygon(diamond,Color(.55,.50,.36,.52))
+		for stone: int in range(4):
+			var p := center+Vector2((stone%2)*12-6,(stone/2)*7-3)
+			canvas.draw_line(p-Vector2(4,0),p+Vector2(4,0),Color(.72,.66,.50,.55),3)
+	elif bool(metadata.get("settlement_path",false)):
+		for direction: Vector2i in OFFSETS:
+			if bool(tiles.get(coordinate+direction,{}).get("metadata",{}).get("settlement_path",false)):
+				var offset := Vector2((direction.x-direction.y)*16,(direction.x+direction.y)*8)
+				canvas.draw_line(center,center+offset,Color(.62,.54,.38,.5),9)
+
 	# Restrained aerial tint makes high distant terrain less visually harsh.
 	var elevation := int(tile.get("metadata",{}).get("terrace",0))
 	if elevation > 1 and detail > 0:
@@ -82,7 +94,7 @@ static func shadow(canvas: CanvasItem, base: Vector2, radius: float, detail: int
 	# Shared light direction. Two translucent ellipses approximate a soft edge.
 	canvas.draw_set_transform(base + Vector2(radius * 0.22, 4), -0.15, Vector2(1.0, 0.35))
 	canvas.draw_circle(Vector2.ZERO, radius, Color(0.05, 0.10, 0.09, 0.09))
-	canvas.draw_circle(Vector2.ZERO, radius * 0.72, Color(0.05, 0.10, 0.09, 0.12))
+	canvas.draw_circle(Vector2.ZERO, radius * 0.72, preload("res://scripts/world/RealmStyle.gd").SHADOW)
 	canvas.draw_set_transform(Vector2.ZERO)
 
 static func foundation(canvas, base: Vector2, kind: String, detail: int) -> void:
@@ -194,7 +206,7 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 			if posmod(coordinate.x*13+coordinate.y*7,11) == 0:
 				batch.draw_line(base+Vector2(-14,5),base+Vector2(-4,2),Color("796b4e"),2)
 		batch.draw_circle(base, radius, Color(0.05,0.10,0.09,0.09))
-		batch.draw_circle(base, radius * 0.72, Color(0.05,0.10,0.09,0.12))
+		batch.draw_circle(base, radius * 0.72, preload("res://scripts/world/RealmStyle.gd").SHADOW)
 	var roads := {}
 	var blocked := tree_cells.duplicate()
 	for resource: Dictionary in resources:
@@ -243,7 +255,7 @@ static func build(renderer: Node2D, coordinates: Array, tiles: Dictionary, resou
 
 		batch.cell = at
 		if kind in ["shelter","storage","tent","workbench"]:
-			batch.draw_circle(base + Vector2(6,4),34,Color(0.05,0.10,0.09,0.12))
+			batch.draw_circle(base + Vector2(6,4),34,preload("res://scripts/world/RealmStyle.gd").SHADOW)
 			for i: int in range(3):
 				batch.draw_line(base+Vector2(8+i*5,11+i*2),base+Vector2(13+i*5,9+i*2),Color(0.52,0.50,0.42,0.55),2)
 			var stock: Dictionary = structure.get("stockpile", {}) if structure.get("stockpile") is Dictionary else {}

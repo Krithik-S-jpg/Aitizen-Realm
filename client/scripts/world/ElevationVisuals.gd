@@ -1,5 +1,6 @@
 extends RefCounted
 const STEP := 36.0
+const Style = preload("res://scripts/world/RealmStyle.gd")
 
 static func level(tiles: Dictionary, at: Vector2i) -> int:
 	var meta: Dictionary = tiles.get(at,{}).get("metadata",{})
@@ -20,9 +21,16 @@ static func faces(renderer, at: Vector2i, center: Vector2) -> void:
 		var b := diamond[2+edge]
 		var down := Vector2(0,drop*STEP)
 		var face := PackedVector2Array([a,b,b+down,a+down])
-		var tint := Color("e0daca") if edge == 0 else Color("abae9e")
+		var tint := Style.ROCK_LIGHT if edge == 0 else Style.ROCK_SHADE
 		var u := float(at.x if edge == 0 else at.y)*.25
 		renderer.draw_polygon(face,PackedColorArray([tint]),PackedVector2Array([Vector2(u,0),Vector2(u+.25,0),Vector2(u+.25,drop*.2),Vector2(u,drop*.2)]),renderer._ground_material("cliff-face"))
+		# Bevel the exposed corner with a narrow darker facet. The grounded
+		# contact edge stays aligned to navigation geometry.
+		if edge == 0 and height > ground_level(renderer._tiles,at+Vector2i(0,1)):
+			var corner := diamond[2]
+			renderer.draw_colored_polygon(PackedVector2Array([corner-Vector2(4,2),corner+Vector2(4,-2),corner+down+Vector2(4,-2),corner+down-Vector2(4,0)]),Color("686c59"))
+
+
 		var tile: Dictionary = renderer._tiles[at]
 		var neighbor: Dictionary = renderer._tiles.get(at+delta,{})
 		var waterfall := str(tile.get("terrain","")).to_lower() in ["water","ocean"] and str(neighbor.get("terrain","")).to_lower() in ["water","ocean"]
@@ -52,7 +60,7 @@ static func faces(renderer, at: Vector2i, center: Vector2) -> void:
 				var left := a.lerp(b,t)
 				var right := a.lerp(b,t+.2)
 				var depth := 2.0+float((seed+section*7)%6)
-				renderer.draw_colored_polygon(PackedVector2Array([left,right,right+Vector2(-1,depth*.65),left+Vector2(1,depth)]),Color("78805c"))
+				renderer.draw_colored_polygon(PackedVector2Array([left,right,right+Vector2(-1,depth*.65),left+Vector2(1,depth)]),Style.SOD)
 				if renderer._quality_detail_cap > 0:
 					var rock := left+down*(.3+float((seed+section)%4)*.12)
 					renderer.draw_colored_polygon(PackedVector2Array([rock,rock+Vector2(7,-3),rock+Vector2(10,4),rock+Vector2(2,7)]),Color(.59,.57,.47,.28))

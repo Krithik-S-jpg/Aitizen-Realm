@@ -40,6 +40,11 @@ func _run() -> void:
 	for location: Vector2i in [Vector2i(16,12),Vector2i(20,12),Vector2i(20,17)]:
 		structures.append({"id":str(location),"x":location.x,"y":location.y,"structure_type":"shelter","completed":true,"entrance":[location.x+1,location.y],"footprint":[[location.x,location.y],[location.x-1,location.y],[location.x,location.y-1],[location.x-1,location.y-1]]})
 	structures.append({"id":"fire","x":17,"y":16,"structure_type":"campfire","completed":true,"fuel":10})
+	for x: int in range(16,19):
+		for y: int in range(15,18):
+			tiles[Vector2i(x,y)].metadata.settlement_square = true
+	for x: int in range(17,22):
+		tiles[Vector2i(x,14)].metadata.settlement_path = true
 	var entities: Array = []
 	for i: int in range(4):
 		entities.append({"id":"person%d"%i,"kind":"agent","name":"Citizen","x":15+i,"y":16+i,"avatar_id":"juniper" if i%2 else "rowan","action":"idle","metadata":{}})

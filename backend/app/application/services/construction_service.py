@@ -77,6 +77,8 @@ class ConstructionService:
             raise ValueError("Keep terrace ramps clear of foundations.")
         for point in reserved:
             tile = world.retrieve_tile(*point)
+            if tile and tile.metadata.get("settlement_square") and kind not in {StructureType.ROAD,StructureType.TORCH,StructureType.CAMPFIRE,StructureType.WELL}:
+                raise ValueError("Keep the shared settlement square open.")
             if not tile or not tile.walkable or tile.metadata.get("cave"):
                 raise ValueError("Foundation and entrance require clear, loaded land.")
             if point in solid:

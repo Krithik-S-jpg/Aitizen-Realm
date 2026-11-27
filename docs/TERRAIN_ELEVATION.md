@@ -30,3 +30,10 @@ Validation: 18 tests passed including the settlement-life simulation; Godot cach
 Cache terrain positions and static depth records; cull before adding static records to the per-frame sort. Plateau interiors use the static terrain/scenery meshes; only exposed terrace edges are redrawn in the occlusion queue. Regression check passed.
 
 Desktop GL Compatibility benchmark: elevated 64x64 fixture, 520 resources, 48 entities, 1152x648 on Intel UHD. Final run 50.8 FPS, median 17.31 ms, p95 31.38 ms, worst 38.70 ms, 186 draw calls. The benchmark exited 1 because its performance target was not met. Earlier intermediate run: 27.2 FPS and 723 calls, but preview activity overlapped that run, so this is not a controlled speedup measurement. Not a hosted-browser result.
+
+## Shared courts and style
+Completed wells/campfires anchor derived courts on clear level ground. Bounded pathfinding connects nearby completed home/workshop/storage/farm entrances via actual walkable cells, ramps and completed bridges. New solid construction cannot occupy designated court cells. Existing buildings/resources are never moved. Layout refreshes on structure changes or every 120 ticks; terrain metadata may require a world refresh in clients. This does not automatically construct new bridges or manufacture materials.
+
+Cached court/path artwork, beveled exposed cliff corners and RealmStyle's shared building proportions, rock lighting and shadow palette integrate with existing slope/waterfall geometry. These are procedural textured pieces, not a newly illustrated sprite atlas. Existing animal/character art is retained.
+
+Validation: 10 elevation/settlement-life tests plus one court/path preservation test passed; Godot scenery regression and preview passed. Hosted FPS is not remeasured for this pass.

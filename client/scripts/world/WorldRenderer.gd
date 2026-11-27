@@ -1669,11 +1669,7 @@ func _buildable_region(kind: String) -> Rect2:
 
 
 func _buildable_destination(base: Vector2, kind: String, source: Rect2) -> Rect2:
-	var height: float = {
-		"shelter": 124.0, "house": 124.0, "home": 124.0,
-		"tent": 90.0, "storage": 96.0, "campfire": 32.0,
-		"workbench": 43.0, "well": 62.0, "farm": 54.0, "fence": 35.0
-	}.get(kind, 82.0) as float
+	var height: float = preload("res://scripts/world/RealmStyle.gd").BUILDING_HEIGHTS.get(kind,82.0) as float
 	var width := height * source.size.x / maxf(source.size.y, 1.0)
 	return Rect2(base + Vector2(-width * 0.5, -height + 8.0), Vector2(width, height))
 

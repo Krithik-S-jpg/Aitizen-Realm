@@ -16,12 +16,18 @@ class SettlementService:
     def __init__(self, repository: IWorldRepository) -> None:
         """Initializes settlement coordination against the active world."""
         self._repository = repository
+        self._layout_signature = None
 
     def advance_all(self, tick: int) -> None:
         """Refreshes households, useful jobs, and current job claims."""
         world = self._repository.get()
         if world is None:
             return
+        signature = (id(world),tuple((str(s.id),s.completed) for s in world.structures.values()))
+        if signature != self._layout_signature or tick % 120 == 0:
+            from app.application.services.settlement_layout import refresh
+            refresh(world)
+            self._layout_signature = signature
         self._assign_households(world, tick)
         desired = self._desired_jobs(world, tick)
         for key, job in list(world.settlement_jobs.items()):
