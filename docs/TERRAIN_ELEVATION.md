@@ -1,6 +1,6 @@
 # Raised terrain
 
-New generated terrain uses saved terrace levels (0–4), connected stair edges and downstream river levels. Existing saves remain flat; they are not migrated automatically. Create a new world to use the terrain system.
+New generated terrain uses saved terrace levels (0â€“4), connected stair edges and downstream river levels. Legacy flat checkpoints are upgraded on restore in the loaded copy. Stored checkpoints are not overwritten. Existing structures and their immediate surroundings are kept level; original walkable land edges receive ramps where needed. Resources and citizens are preserved. Save the upgraded world as a new checkpoint to retain the old backup. Already elevated saves retain their terrain layout.
 
 Navigation and animal movement reject unmarked cliff crossings. Harvesting checks the actor terrace. Foundations and entrances must share a level and cannot occupy stairs. Completed bridges use the height of matching opposite banks while the water remains below the deck.
 
@@ -13,3 +13,6 @@ Generated with the built-in image generation tool, opaque new texture, at client
 
 ## Natural detail pass
 Neighbor-weighted elevation reduces isolated pillars in newly generated terrain. Cliff rims include broken sod, moss, shaded facets and toe rubble. Shoreline reeds use the cached scenery mesh; waterfall foam animates only on visible faces. Six elevation regressions and the Godot scenery check passed after this pass; browser export rebuilt. Hosted FPS remains unmeasured.
+
+## Legacy upgrade and broader landforms
+Elevation is smoothed over a weighted seven-by-seven neighborhood for new terrain. Visual terrace steps are 36 pixels (previously 24). Fifteen focused tests pass, including legacy content preservation, level foundations, traversable land edges and idempotent migration. Live hosted-save verification and FPS measurements remain pending.

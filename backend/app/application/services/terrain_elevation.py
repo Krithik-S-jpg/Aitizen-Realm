@@ -19,7 +19,7 @@ def can_step(world, start, end):
         list(end) in a.metadata.get("ramps", []) or list(start) in b.metadata.get("ramps", []))
 
 
-def initialize(world):
+def initialize(world, preserve_resources=False):
     """Initialize generated terrain, preserving already initialized cells."""
     world.elevation_version = 1
     tiles = {(t.x,t.y):t for c in world.chunks.values() for t in c.tiles.values()}
@@ -27,10 +27,11 @@ def initialize(world):
     for tile in tiles.values():
         # Broad connected landforms rather than isolated one-cell pillars.
         elevation = float(tile.metadata.get("elevation",.3))
-        neighbors = [float(tiles[(tile.x+dx,tile.y+dy)].metadata.get("elevation",.3))
-                     for dx,dy in ((-1,0),(1,0),(0,-1),(0,1))
+        neighbors = [(float(tiles[(tile.x+dx,tile.y+dy)].metadata.get("elevation",.3)),
+                      1.0/(1+abs(dx)+abs(dy)))
+                     for dx in range(-3,4) for dy in range(-3,4)
                      if (tile.x+dx,tile.y+dy) in tiles]
-        smooth = elevation*.65 + (sum(neighbors)/len(neighbors) if neighbors else elevation)*.35
+        smooth = sum(value*weight for value,weight in neighbors)/sum(weight for _,weight in neighbors)
         height = max(0,min(4,int((smooth-.3)*8)))
         if tile.terrain.value in WATER:
             height = max(0,height-1) if tile.metadata.get("river") else 0
@@ -77,4 +78,44 @@ def initialize(world):
             parent[root(p)] = root(q)
     # Generated stairs must not spawn underneath a tree or mineral node.
     world.resources = {key:r for key,r in world.resources.items()
-                       if (r.x,r.y) not in fresh or not tiles[(r.x,r.y)].metadata.get("ramps")}
+                       if preserve_resources or (r.x,r.y) not in fresh or not tiles[(r.x,r.y)].metadata.get("ramps")}
+
+
+def upgrade_legacy(world):
+    """Upgrade the loaded copy; the original checkpoint remains untouched.
+
+    Preserve all people, resources and foundations. Legacy walkable edges
+    remain traversable via ramps; existing buildings share a level base.
+    """
+    if world.elevation_version:
+        return False
+    initialize(world, preserve_resources=True)
+    tiles = {(t.x,t.y):t for c in world.chunks.values() for t in c.tiles.values()}
+    protected = set()
+    for structure in world.structures.values():
+        protected.update(structure.footprint)
+        protected.add(structure.entrance)
+    protected = {(x+dx,y+dy) for x,y in protected
+                 for dx,dy in ((0,0),(1,0),(-1,0),(0,1),(0,-1))}
+    for point in protected:
+        if point in tiles:
+            tiles[point].metadata['terrace'] = 0
+            tiles[point].metadata.pop('bridge_level',None)
+    # Lower steep neighboring land until legacy walking routes can use stairs.
+    for _ in range(4):
+        for p,tile in tiles.items():
+            if not tile.walkable:
+                continue
+            for q in ((p[0]+1,p[1]),(p[0]-1,p[1]),(p[0],p[1]+1),(p[0],p[1]-1)):
+                other = tiles.get(q)
+                if other and other.walkable and level(tile)>level(other)+1:
+                    tile.metadata['terrace'] = level(other)+1
+    for p,tile in tiles.items():
+        tile.metadata['ramps'] = []
+        if not tile.walkable:
+            continue
+        for q in ((p[0]+1,p[1]),(p[0]-1,p[1]),(p[0],p[1]+1),(p[0],p[1]-1)):
+            other = tiles.get(q)
+            if other and other.walkable and abs(level(tile)-level(other)) == 1:
+                tile.metadata['ramps'].append(list(q))
+    return True

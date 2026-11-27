@@ -1,5 +1,5 @@
 extends RefCounted
-const STEP := 24.0
+const STEP := 36.0
 
 static func level(tiles: Dictionary, at: Vector2i) -> int:
 	var meta: Dictionary = tiles.get(at,{}).get("metadata",{})

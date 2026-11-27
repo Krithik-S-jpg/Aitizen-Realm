@@ -69,6 +69,8 @@ class WorldService:
 
     def restore_world(self, world: World) -> None:
         """Install a validated snapshot without generating replacement entities."""
+        from app.application.services.terrain_elevation import upgrade_legacy
+        upgrade_legacy(world)
         from app.application.services.marine_service import MarineService
         MarineService(self._repository).initialize(world)
         from app.application.services.cave_service import CaveService

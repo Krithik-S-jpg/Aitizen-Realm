@@ -85,3 +85,28 @@ def test_initializing_existing_cells_preserves_resources_and_stairs():
     before = world.model_dump_json()
     initialize(world)
     assert world.model_dump_json() == before
+
+
+def test_legacy_upgrade_preserves_content_and_walkable_edges():
+    from app.application.services.terrain_elevation import upgrade_legacy
+    from app.domain.models.structure import Structure
+    world = WorldGenerator.generate_flat_world(16,16)
+    for chunk in world.chunks.values():
+        for tile in chunk.tiles.values():
+            tile.metadata['elevation'] = .55 + tile.x*.02
+    site = Structure(structure_type=StructureType.SHELTER,x=8,y=8,footprint_version=2,builder_id="test",work_required=10)
+    world.structures[str(site.id)] = site
+    contents = (world.resources.copy(),world.entities.copy(),world.structures.copy())
+    original = world.model_dump_json()
+    assert upgrade_legacy(world)
+    assert contents == (world.resources,world.entities,world.structures)
+    assert len({level(world.retrieve_tile(*p)) for p in site.footprint | {site.entrance}}) == 1
+    for chunk in world.chunks.values():
+        for tile in chunk.tiles.values():
+            for q in ((tile.x+1,tile.y),(tile.x,tile.y+1)):
+                if world.retrieve_tile(*q):
+                    assert can_step(world,(tile.x,tile.y),q)
+    upgraded = world.model_dump_json()
+    assert not upgrade_legacy(world)
+    assert world.model_dump_json() == upgraded
+    assert World.model_validate_json(original).elevation_version == 0
