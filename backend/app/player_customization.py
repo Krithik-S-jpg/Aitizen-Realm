@@ -4,6 +4,7 @@ from starlette.responses import RedirectResponse, FileResponse
 from app.domain.models.entity import CitizenAvatar
 
 APPEARANCES = [('juniper','Juniper'),('rowan','Rowan (new)'),('scout','Aster'),('builder','Ember'),('herbalist','Fern'),('scholar','Lumen'),('cook','Rowan'),('miner','Saffron'),('fisher','Tide'),('artisan','Violet')]
+APPEARANCES = [('adult_male', 'Male base'), ('adult_female', 'Female base')] + APPEARANCES
 
 
 def form(entity):

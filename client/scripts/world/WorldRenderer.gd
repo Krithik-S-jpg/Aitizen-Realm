@@ -84,7 +84,14 @@ func _cache_water_profiles() -> void:
 		for offset: Vector2i in [Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2)]:
 			if str(_tiles.get(coordinate + offset, {}).get("terrain", "")).to_lower() in ["water", "ocean"]:
 				exposure += 0.25
-		_water_profiles[coordinate] = {"exposure": exposure, "ocean": terrain == "ocean", "quiet": terrain in ["wetland", "swamp"], "edges": shoreline_edges(coordinate)}
+		var flow := Vector2.ZERO
+		var destination: Array = _tiles[coordinate].get("metadata", {}).get("flow_to", [])
+		if destination.size() == 2:
+			var target := Vector2i(int(destination[0]), int(destination[1]))
+			if target != coordinate and str(_tiles.get(target, {}).get("terrain", "")).to_lower() in ["water", "ocean", "wetland", "swamp"]:
+				var delta := Vector2(target - coordinate)
+				flow = Vector2((delta.x - delta.y) * 32.0, (delta.x + delta.y) * 16.0).normalized()
+		_water_profiles[coordinate] = {"exposure": exposure, "ocean": terrain == "ocean", "quiet": terrain in ["wetland", "swamp"], "edges": shoreline_edges(coordinate), "flow": flow}
 
 func water_wave_strength(coordinate: Vector2i) -> float:
 	var profile: Dictionary = _water_profiles.get(coordinate, {})
@@ -104,25 +111,38 @@ func _draw_water_waves(coordinate: Vector2i, center: Vector2) -> void:
 	if profile.is_empty():
 		return
 	var strength := water_wave_strength(coordinate)
-	var speed := .18 + strength * .35
+	var flow: Vector2 = profile.flow
+	var direction := flow if not flow.is_zero_approx() else _wind_vector().normalized()
+	if direction.is_zero_approx():
+		direction = Vector2(1, .2).normalized()
+	var speed := .42 if not flow.is_zero_approx() else .18 + strength * .35
 	var seed := _seabed_random(coordinate, 83)
 	# Local crests remain inside the tile diamond; no foam leaks onto land.
-	var count := 1 if seed < .6 else 0
+	var count := 1 if seed < .75 or not flow.is_zero_approx() else 0
 	for crest in range(count):
 		var phase := fposmod(_visual_seconds * speed + seed + crest * .5, 1)
 		var fade := sin(phase * PI)
 		var points := PackedVector2Array()
-		var direction := _wind_vector()
 		for sample in range(5):
 			var t := float(sample) / 4.0
-			var x := (t - .5) * (12 + strength * 20) * (.7 + seed * .6)
-			var y := (phase - .5) * 10 + sin(t * PI) * strength * 2 + (seed - .5) * 5
-			points.append(center + Vector2(x, y) + Vector2(direction.x * (phase - .5) * 8, 0))
+			var across := Vector2(-direction.y, direction.x)
+			var offset := across * ((t - .5) * 13.0) + direction * ((phase - .5) * 17.0 + sin(t * PI) * strength * 2.0)
+			points.append(center + offset)
 		var bucket := mini(2, int(fade * 3.0))
 		if _wave_batches.size() == 3:
 			for segment: int in range(points.size()-1):
 				_wave_batches[bucket].append(points[segment])
 				_wave_batches[bucket].append(points[segment+1])
+	# Shore wash travels inward from cached bank edges, fading before its reset.
+	if _wave_batches.size() == 3 and not profile.quiet:
+		var diamond := _diamond_at(center)
+		for edge: int in profile.edges:
+			var phase := fposmod(_visual_seconds * .26 + seed, 1.0)
+			var a := diamond[edge].lerp(center, .12 + phase * .22)
+			var b := diamond[(edge + 1) % 4].lerp(center, .12 + phase * .22)
+			var bucket := mini(2, int(sin(phase * PI) * 3.0))
+			_wave_batches[bucket].append(a.lerp(b, .15))
+			_wave_batches[bucket].append(a.lerp(b, .85))
 
 func _flush_water_waves() -> void:
 	# Six batched strokes replace two draw commands per individual crest.
@@ -2064,9 +2084,10 @@ func _map_vector_to_local(map_position: Vector2) -> Vector2:
 static func animation_frame(seconds: float, frame_count: int, cycle_seconds: float) -> int:
 	if frame_count <= 1:
 		return 0
-	# Sample at 24 Hz without speeding up short source sequences.
-	var sampled_time := floorf(seconds * ANIMATION_FPS) / ANIMATION_FPS
-	return int(floorf(fposmod(sampled_time, maxf(cycle_seconds, 0.1)) / maxf(cycle_seconds, 0.1) * frame_count)) % frame_count
+	# Quantize once, into source frames. A second 24 Hz quantization delays
+	# foot contacts and produces uneven frame durations in eight-frame cycles.
+	var duration := maxf(cycle_seconds, 0.1)
+	return int(floorf(fposmod(seconds, duration) / duration * frame_count + 0.00001)) % frame_count
 
 
 func _speech_bubble_style() -> StyleBoxFlat:

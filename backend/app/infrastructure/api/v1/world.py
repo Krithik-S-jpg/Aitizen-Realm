@@ -394,6 +394,7 @@ def _format_entity(entity: Any, world: World) -> dict[str, Any]:
         "tags": sorted(entity.tags),
         "profession": entity.profession.value.lower(),
         "avatar_id": entity.avatar_id.value,
+        "appearance": entity.appearance.model_dump() if entity.appearance else None,
         "skills": entity.skills,
         "group_id": entity.group_id,
         "perception_radius": entity.perception_radius,

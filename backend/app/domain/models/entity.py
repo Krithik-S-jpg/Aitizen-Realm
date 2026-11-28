@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_serializer
 
 from app.domain.models.needs import NeedsState
+from app.domain.models.appearance import CharacterAppearance
 from app.domain.models.society import Profession
 
 
@@ -22,6 +23,8 @@ class CitizenAvatar(StrEnum):
     """Stable visual identities selectable for citizen characters."""
 
     SCOUT = "scout"
+    ADULT_MALE = "adult_male"
+    ADULT_FEMALE = "adult_female"
     BUILDER = "builder"
     HERBALIST = "herbalist"
     SCHOLAR = "scholar"
@@ -50,6 +53,7 @@ class Entity(BaseModel):
     skills: dict[str, float] = Field(default_factory=dict)
     group_id: UUID | None = None
     avatar_id: CitizenAvatar = CitizenAvatar.SCOUT
+    appearance: CharacterAppearance | None = None
     gender: Literal["unspecified", "female", "male", "nonbinary"] = "unspecified"
     diet: Literal["omnivore", "vegetarian"] = "omnivore"
 

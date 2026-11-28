@@ -16,6 +16,8 @@ signal boat_requested(entity_id: String, command: String, destination: Vector2i)
 signal follow_entity_requested(entity_id: String)
 
 const CITIZEN_AVATARS: Array[Dictionary] = [
+	{"id": "adult_male", "name": "Male base", "tint": "526d61"},
+	{"id": "adult_female", "name": "Female base", "tint": "70816a"},
 	{"id": "juniper", "name": "Juniper", "tint": "449b8c"},
 	{"id": "rowan", "name": "Rowan (new)", "tint": "448d91"},
 	{"id": "scout", "name": "Aster", "tint": "1fa9ad"},

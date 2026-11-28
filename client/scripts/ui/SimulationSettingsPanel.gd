@@ -9,7 +9,7 @@ signal new_world_requested(options: Dictionary)
 signal world_restored()
 signal pause_requested()
 
-const STARTER_AVATAR_IDS := ["scout", "builder", "herbalist", "scholar", "cook", "miner", "fisher", "artisan", "juniper", "rowan"]
+const STARTER_AVATAR_IDS := ["scout", "builder", "herbalist", "scholar", "cook", "miner", "fisher", "artisan", "juniper", "rowan", "adult_male", "adult_female"]
 
 var _panel: PanelContainer
 var _status: Label
@@ -252,7 +252,7 @@ func _build() -> void:
 	seed_row.add_child(_random_seed)
 	seed_row.add_child(_world_seed)
 	_add_field(world_grid, "Terrain seed", seed_row)
-	_starter_avatar = _options(["Aster", "Ember", "Fern", "Lumen", "Rowan", "Saffron", "Tide", "Violet", "Juniper", "Rowan (new)"])
+	_starter_avatar = _options(["Aster", "Ember", "Fern", "Lumen", "Rowan", "Saffron", "Tide", "Violet", "Juniper", "Rowan (new)", "Male base", "Female base"])
 	_add_field(world_grid, "Starting appearance", _starter_avatar)
 	var create_world := Button.new()
 	create_world.text = "✦  CREATE FRESH WORLD"

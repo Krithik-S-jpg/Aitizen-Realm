@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aitizen — Adult animation review</title>
+<style>
+body{margin:0;background:#192d28;color:#eee8d8;font:16px system-ui}main{max-width:1000px;margin:auto;padding:24px}h1{font-size:22px}canvas{width:100%;background:#243b34;border-radius:16px}fieldset{border:0;padding:16px 0;display:flex;gap:16px;flex-wrap:wrap}button,select{background:#364d43;color:inherit;border:1px solid #8b9e8d;border-radius:8px;padding:10px}p{color:#b8c7bc}label{display:flex;align-items:center;gap:8px}
+</style><main><h1>Adult animation review</h1><canvas width="1000" height="420" aria-label="Animated male and female bases"></canvas>
+<fieldset><label>Action <select id="action"><option value="move">Walk</option><option value="carry">Carry</option><option value="idle">Idle</option><option value="build">Work</option><option value="sleep">Rest</option><option value="gather">Gather</option></select></label><label>Speed <select id="speed"><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option></select></label><button id="play">Pause</button><button id="turn">Turn</button></fieldset><p id="status">Loading local atlases…</p></main>
+<script>
+(async()=>{
+ const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
+ const action=document.querySelector('#action'),speed=document.querySelector('#speed'),play=document.querySelector('#play');
+ const catalog=await fetch('../../client/config/citizen_adult_actions.json').then(r=>r.json());
+ const people=await Promise.all(['adult_male','adult_female'].map(async key=>{const profile=catalog[key],image=new Image();image.src='../../client/'+profile.texture.replace('res://','');await image.decode();return{key,profile,image}}));
+ let running=true,facing=1,time=0,last=performance.now();
+ play.onclick=()=>{running=!running;play.textContent=running?'Pause':'Play'};
+ document.querySelector('#turn').onclick=()=>facing*=-1;
+ action.onchange=()=>time=0;
+ document.querySelector('#status').textContent='Eight frames per action. Mirrored three-quarter views. Existing citizens are unchanged.';
+ function draw(now){if(running && !document.hidden)time+=Math.min((now-last)/1000,.1)*Number(speed.value);last=now;ctx.clearRect(0,0,1000,420);people.forEach((p,i)=>{const frames=p.profile.actions[action.value],cycle=['move','carry'].includes(action.value)?.8:['idle','sleep'].includes(action.value)?2.4:1.2,f=frames[Math.floor((time%cycle)/cycle*frames.length)],scale=p.profile.scale*4;ctx.strokeStyle='#6c8872';ctx.beginPath();ctx.moveTo(120+i*500,350);ctx.lineTo(380+i*500,350);ctx.stroke();ctx.save();ctx.translate(250+i*500,350);ctx.scale(facing,1);ctx.drawImage(p.image,f[0],f[1],f[2],f[3],f[4]*scale,-f[3]*scale,f[2]*scale,f[3]*scale);ctx.restore();ctx.fillStyle='#eee8d8';ctx.font='18px system-ui';ctx.fillText(i?'Female base':'Male base',200+i*500,40)});requestAnimationFrame(draw)}requestAnimationFrame(draw);
+})().catch(()=>document.querySelector('#status').textContent='Serve the repository over localhost to load the animation catalog.');
+</script></html>

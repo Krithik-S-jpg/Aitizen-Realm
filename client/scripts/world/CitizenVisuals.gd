@@ -3,17 +3,22 @@ extends RefCounted
 # Shared atlas cache: no image decoding or region scanning in the frame loop.
 static var _catalog: Dictionary = {}
 static var _textures: Dictionary = {}
+static var _legacy_loaded := false
 
 static func profile(avatar: String) -> Dictionary:
-	if _catalog.is_empty():
+	if not _legacy_loaded:
+		_legacy_loaded = true
 		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://config/citizen_actions.json"))
 		if parsed is Dictionary:
-			_catalog = parsed
+			_catalog.merge(parsed, false)
 		# Complete identity overrides replace the old catalog entry, including any
 		# old gather texture. Stable avatar IDs keep existing saves compatible.
 		var human: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://config/citizen_human_actions.json"))
 		if human is Dictionary:
 			_catalog.merge(human, true)
+		var adults: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://config/citizen_adult_actions.json"))
+		if adults is Dictionary:
+			_catalog.merge(adults, true)
 		var care_path := "res://assets/pixel_art/citizens/aster_care_v1.png"
 		var care_texture := load(care_path) as Texture2D
 		var care_image := care_texture.get_image() if care_texture != null else null
