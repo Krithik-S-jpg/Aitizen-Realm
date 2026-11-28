@@ -303,6 +303,8 @@ func _build() -> void:
 	_add_field(climate_grid, "Weather region", _precipitation_radius)
 	var visual_grid := _section(content, "DISPLAY", "Tune ambient effects without changing simulation decisions.")
 	_visual_quality = _options(["High", "Balanced", "Performance"])
+	if OS.has_feature("web"):
+		_visual_quality.select(2)
 	_add_field(visual_grid, "World effects", _visual_quality)
 	var reduce_hover := CheckButton.new()
 	reduce_hover.text = "Instant button feedback"

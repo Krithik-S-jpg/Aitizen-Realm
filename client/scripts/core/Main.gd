@@ -56,7 +56,7 @@ func _ready() -> void:
 	# Browser exports cannot rely on the operating system's symbol fonts.
 	ThemeDB.fallback_font = preload("res://assets/fonts/InterfaceFont.tres")
 	if OS.has_feature("web"):
-		world_scene.set_visual_quality("balanced")
+		world_scene.set_visual_quality("performance")
 	if not RuntimeConfig.is_player():
 		add_child(preload("res://scripts/network/ObserverCapture.gd").new())
 	_world_editor = preload("res://scripts/ui/WorldEditor.gd").new()

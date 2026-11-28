@@ -146,8 +146,6 @@ func _draw_rain(max_count: int) -> void:
 		)
 		if not _local_view_rect.has_point(start) or not _allows_point(start):
 			continue
-		if is_instance_valid(renderer) and not renderer._tiles.has(renderer.local_to_map(start)):
-			continue
 		var depth: float = 0.65 + float(index % 4) * 0.12
 		draw_line(
 			start,

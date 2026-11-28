@@ -61,7 +61,7 @@ var _cave_texture: Texture2D
 var _ridge_texture: Texture2D = preload("res://assets/world/ridge-v1.png")
 var _mountain_profiles: Dictionary = {}
 var _water_profiles: Dictionary = {}
-var _wave_batches: Array[PackedVector2Array] = []
+var _wave_batches: Array[Array] = []
 var _speech_cues: Dictionary = {}
 var _night_light := false
 var _occupied_homes: Dictionary = {}
@@ -150,8 +150,8 @@ func _flush_water_waves() -> void:
 		if _wave_batches[bucket].is_empty():
 			continue
 		var alpha := (bucket+0.5)/3.0
-		draw_multiline(_wave_batches[bucket],Color(.35,.72,.87,alpha*.20),3.5,true)
-		draw_multiline(_wave_batches[bucket],Color(.77,.94,1,alpha*.35),1.1,true)
+		_canvas().draw_multiline(PackedVector2Array(_wave_batches[bucket]),Color(.35,.72,.87,alpha*.20),3.5,true)
+		_canvas().draw_multiline(PackedVector2Array(_wave_batches[bucket]),Color(.77,.94,1,alpha*.35),1.1,true)
 
 
 func set_cave_view(enabled: bool) -> void:
@@ -184,7 +184,7 @@ func _interior_floor(coordinate: Vector2i, point: Vector2, name: String, colors:
 	var uv := PackedVector2Array()
 	for offset: Vector2 in [Vector2.ZERO,Vector2(1,0),Vector2(1,1),Vector2(0,1)]:
 		uv.append((Vector2(coordinate)+offset)/4.0)
-	draw_polygon(_diamond_at(point), colors, uv, _ground_material(name))
+	_canvas().draw_polygon(_diamond_at(point), colors, uv, _ground_material(name))
 
 func _water_corner_tint(corner: Vector2i) -> Color:
 	var depth := 0.0
@@ -203,11 +203,11 @@ func _interior_prop(key: String, base: Vector2, height: float, tint := Color.WHI
 	if texture == null or region.size.y <= 0:
 		return
 	var size := region.size * (height / region.size.y)
-	draw_texture_rect_region(texture, Rect2(base - Vector2(size.x * .5, size.y), size), region, tint)
+	_canvas().draw_texture_rect_region(texture, Rect2(base - Vector2(size.x * .5, size.y), size), region, tint)
 
 func _draw_caves() -> void:
 	if not _is_dynamic_layer:
-		draw_rect(Rect2(-1000000, -1000000, 2000000, 2000000), Color("17171c"))
+		_canvas().draw_rect(Rect2(-1000000, -1000000, 2000000, 2000000), Color("17171c"))
 		for coordinate: Vector2i in _ordered_coordinates:
 			var cave: Dictionary = _tiles[coordinate].get("metadata", {}).get("cave", {})
 			if cave.is_empty():
@@ -234,22 +234,22 @@ func _draw_caves() -> void:
 				# Fine stone seams and grit preserve a readable, open walking surface.
 				for speck in range(7):
 					var offset := Vector2((_seabed_random(tile, speck + 30) - .5) * 38, (_seabed_random(tile, speck + 60) - .5) * 16)
-					draw_line(point + offset, point + offset + Vector2(3, 1), Color(.7, .68, .63, .13), 1)
+					_canvas().draw_line(point + offset, point + offset + Vector2(3, 1), Color(.7, .68, .63, .13), 1)
 				for delta: Vector2i in [Vector2i(-1, 0), Vector2i(0, -1)]:
 					if not floor_lookup.has(local_cell + delta):
 						var a := point + Vector2(-tile_width * .5, 0) if delta.x == -1 else point + Vector2(0, -tile_height * .5)
 						var b := point + Vector2(0, -tile_height * .5) if delta.x == -1 else point + Vector2(tile_width * .5, 0)
 						var rise := Vector2(0, 27 + shade * 9)
-						draw_colored_polygon(PackedVector2Array([a, b, b-rise, a-rise]), Color("34343d") if delta.x == -1 else Color("40404a"))
-						draw_line(a-rise, b-rise, Color("696671"), 3)
-						draw_line(a-rise*.45, b-rise*.45, Color("292a32"), 2)
+						_canvas().draw_colored_polygon(PackedVector2Array([a, b, b-rise, a-rise]), Color("34343d") if delta.x == -1 else Color("40404a"))
+						_canvas().draw_line(a-rise, b-rise, Color("696671"), 3)
+						_canvas().draw_line(a-rise*.45, b-rise*.45, Color("292a32"), 2)
 						props.append(["wall", point + Vector2(0, -5), 55, Color("a3a0a6") * Color(visibility,visibility,visibility,1)])
 				if not explored:
 					continue
 				if _seabed_random(tile, 21) < 0.055 and local_cell.length() > 2:
 					var decoration := 2 if shade < .6 else 3
 					for glow in range(4, 0, -1):
-						draw_circle(point, glow * 7, Color(.12, .55, .65, .018))
+						_canvas().draw_circle(point, glow * 7, Color(.12, .55, .65, .018))
 					props.append(["crystal" if decoration == 2 else "stalagmite", point, 35])
 				var feature: Dictionary = cave.get("features", {}).get("%d,%d" % [local_cell.x, local_cell.y], {})
 				var feature_kind := str(feature.get("kind", ""))
@@ -263,10 +263,10 @@ func _draw_caves() -> void:
 			for prop: Array in props:
 				_interior_prop(prop[0],prop[1],prop[2],prop[3] if prop.size()>3 else Color.WHITE)
 			var entry := map_to_local(coordinate)
-			draw_arc(entry, 16, 0, TAU, 24, Color("b7b694"), 2)
-			draw_string(ThemeDB.fallback_font, entry + Vector2(-26, 27), "EXIT ↑", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("d6d2b7"))
+			_canvas().draw_arc(entry, 16, 0, TAU, 24, Color("b7b694"), 2)
+			_canvas().draw_string(ThemeDB.fallback_font, entry + Vector2(-26, 27), "EXIT ↑", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("d6d2b7"))
 			if surveyed.size() < floor_lookup.size():
-				draw_string(ThemeDB.fallback_font, entry + Vector2(-63, 43), "Unexplored passages", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("aca798"))
+				_canvas().draw_string(ThemeDB.fallback_font, entry + Vector2(-63, 43), "Unexplored passages", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("aca798"))
 	else:
 		for entity: Dictionary in _ordered_entities:
 			var meta: Dictionary = entity.get("metadata", {})
@@ -285,7 +285,7 @@ func _draw_caves() -> void:
 			else:
 				if meta.get("cave_prepared", false):
 					for ring: int in range(3,0,-1):
-						draw_circle(point + Vector2(0,-12), ring*17, Color(1,.75,.36,.025))
+						_canvas().draw_circle(point + Vector2(0,-12), ring*17, Color(1,.75,.36,.025))
 				_draw_agent(point, entity)
 var _marine_texture: Texture2D
 var _swim_texture: Texture2D
@@ -313,7 +313,7 @@ func _water_asset(texture: Texture2D, column: int, row: int, columns: int, rows:
 		var heights := [270.0, 300.0, 252.0, 186.0]
 		source.position.y = starts[row]
 		source.size.y = heights[row]
-	draw_texture_rect_region(texture, Rect2(center - size * 0.5, size), source, tint)
+	_canvas().draw_texture_rect_region(texture, Rect2(center - size * 0.5, size), source, tint)
 
 func _seabed_random(coordinate: Vector2i, salt: int = 0) -> float:
 	# Integer mixing avoids the diagonal stripes of linear modulo placement.
@@ -323,7 +323,7 @@ func _seabed_random(coordinate: Vector2i, salt: int = 0) -> float:
 
 func _draw_underwater() -> void:
 	if not _is_dynamic_layer:
-		draw_rect(Rect2(-1000000, -1000000, 2000000, 2000000), Color("06172e"))
+		_canvas().draw_rect(Rect2(-1000000, -1000000, 2000000, 2000000), Color("06172e"))
 	for coordinate: Vector2i in _ordered_coordinates:
 		var point := map_to_local(coordinate)
 		if not _is_on_screen(point, 120):
@@ -337,7 +337,7 @@ func _draw_underwater() -> void:
 					colors.append(_water_corner_tint(coordinate+offset))
 				_interior_floor(coordinate,point,"seabed-floor",colors)
 			else:
-				draw_colored_polygon(_diamond_at(point),Color("10263e"))
+				_canvas().draw_colored_polygon(_diamond_at(point),Color("10263e"))
 
 		elif wet:
 			var roll := _seabed_random(coordinate)
@@ -357,13 +357,13 @@ func _draw_underwater() -> void:
 				_interior_prop("shellfish", point, 16, Color("a9c9d8"))
 			if roll < 0.025:
 				var ray := PackedVector2Array([point + Vector2(-30, -210), point + Vector2(-10, -210), point + Vector2(70, 10), point + Vector2(10, 10)])
-				draw_colored_polygon(ray, Color(0.5, 0.85, 1, 0.025 + 0.01 * sin(_visual_seconds + roll * 50)))
+				_canvas().draw_colored_polygon(ray, Color(0.5, 0.85, 1, 0.025 + 0.01 * sin(_visual_seconds + roll * 50)))
 			if roll < 0.08:
 				var shimmer := 0.05 + 0.035 * sin(_visual_seconds * 0.8 + roll * 80)
-				draw_arc(point + jitter, 20, 0.3, 2.1, 12, Color(0.3, 0.7, 0.85, shimmer), 1)
+				_canvas().draw_arc(point + jitter, 20, 0.3, 2.1, 12, Color(0.3, 0.7, 0.85, shimmer), 1)
 			if roll < 0.18 and _quality_detail_cap > 0:
 				var drift := fposmod(_visual_seconds * 0.12 + roll * 7, 1)
-				draw_circle(point + Vector2(sin(drift * TAU) * 18, -drift * 60), 0.8, Color(0.6, 0.85, 1, sin(drift * PI) * 0.3))
+				_canvas().draw_circle(point + Vector2(sin(drift * TAU) * 18, -drift * 60), 0.8, Color(0.6, 0.85, 1, sin(drift * PI) * 0.3))
 	for entity: Dictionary in _ordered_entities:
 		if not _is_dynamic_layer or not bool(entity.get("underwater", false)):
 			continue
@@ -384,13 +384,13 @@ func _draw_underwater() -> void:
 			var frame := int(_visual_seconds * 6) % 4
 			if species == "crab" and float(_entity_motion_amounts.get(key, 0)) < 0.01:
 				frame = 0
-			draw_set_transform(center + Vector2(0, -5 if species == "crab" else -25), 0, Vector2(float(_entity_facing.get(key, 1)), 1))
+			_canvas().draw_set_transform(center + Vector2(0, -5 if species == "crab" else -25), 0, Vector2(float(_entity_facing.get(key, 1)), 1))
 			_water_asset(_marine_life_texture, frame, marine_row, 4, 6, Vector2.ZERO, Vector2(85, 65) if species == "shark" else Vector2(38, 38), Color("b0e1ec"))
-			draw_set_transform(Vector2.ZERO)
+			_canvas().draw_set_transform(Vector2.ZERO)
 			continue
 		var row: int = CITIZEN_AQUATIC_ROWS.get(str(entity.get("avatar_id", "scout")), 0)
 		var phase := str(entity.get("dive_phase", "explore"))
-		draw_set_transform(center, 0, Vector2(float(_entity_facing.get(key, 1)), 1))
+		_canvas().draw_set_transform(center, 0, Vector2(float(_entity_facing.get(key, 1)), 1))
 		if CitizenVisuals.has_native_action(str(entity.get("avatar_id", "scout")), "swim"):
 			_draw_agent_sprite(Vector2.ZERO, "swim", _visual_seconds, str(entity.get("visual_avatar", entity.avatar_id)))
 		elif _diving_actions_texture != null and phase in ["descend", "gather", "surface"]:
@@ -398,11 +398,11 @@ func _draw_underwater() -> void:
 			_water_asset(_diving_actions_texture, offset + int(_visual_seconds * 4) % 2, row, 6, 8, Vector2.ZERO, Vector2(100, 100), Color("b0e1ec"))
 		else:
 			_water_asset(_swim_texture, int(_visual_seconds * 8) % 6, row, 6, 8, Vector2.ZERO, Vector2(100, 100), Color("b0e1ec"))
-		draw_set_transform(Vector2.ZERO)
-		draw_string(ThemeDB.fallback_font, center + Vector2(-20, -35), "O2 %d%%" % int(entity.get("oxygen", 100)), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("9de5e8"))
+		_canvas().draw_set_transform(Vector2.ZERO)
+		_canvas().draw_string(ThemeDB.fallback_font, center + Vector2(-20, -35), "O2 %d%%" % int(entity.get("oxygen", 100)), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("9de5e8"))
 		for bubble: int in range(3):
 			var bubble_phase := fposmod(_visual_seconds * 0.5 + bubble * 0.3, 1)
-			draw_arc(center + Vector2(24 + sin(bubble_phase * 4) * 5, -bubble_phase * 45), 2, 0, TAU, 10, Color(0.6, 0.9, 1, 1 - bubble_phase))
+			_canvas().draw_arc(center + Vector2(24 + sin(bubble_phase * 4) * 5, -bubble_phase * 45), 2, 0, TAU, 10, Color(0.6, 0.9, 1, 1 - bubble_phase))
 var _visual_seconds := 0.0
 var _bird_heights: Dictionary = {}
 
@@ -448,7 +448,12 @@ var _wildlife_atlas: Texture2D
 var _wildlife_atlas_2: Texture2D
 var _resource_fall_started_ms: Dictionary = {}
 var _active_chops: Dictionary = {}
+var _paint_target: Node2D
+var _depth_items: Dictionary = {}
+var _highlight_item: Node2D
 var _ordered_coordinates: Array[Vector2i] = []
+var _effect_coordinates: Array[Vector2i] = []
+var _cap_color_cache: Dictionary = {}
 var _ordered_resources: Array = []
 var _ordered_structures: Array = []
 var _ordered_entities: Array = []
@@ -514,6 +519,8 @@ func set_simulation_tick_rate(ticks_per_second: float) -> void:
 
 func set_visual_quality(quality: String) -> void:
 	_quality_detail_cap = {"performance": 0, "balanced": 1, "high": 2}.get(quality.to_lower(), 2)
+	for node in _depth_items.values():
+		node.queue_redraw()
 	_rebuild_scenery()
 	queue_redraw()
 	if not _is_dynamic_layer and _dynamic_layer != null:
@@ -560,6 +567,7 @@ func render_world(
 	_rebuild_draw_order()
 	queue_redraw()
 	if not _is_dynamic_layer and _dynamic_layer != null:
+		_dynamic_layer._mountain_profiles = _mountain_profiles
 		_dynamic_layer.render_world(_tiles, _resources, _structures, _entities)
 
 
@@ -901,6 +909,13 @@ func get_visible_chunk_count() -> int:
 func _draw() -> void:
 	if _cave_texture == null:
 		_cave_texture = load("res://assets/pixel_art/aquatic/mountains_caves_v1.png")
+	if cave_view or underwater_view:
+		for node in _depth_items.values():
+			node.visible = false
+		if _highlight_item != null:
+			_highlight_item.visible = false
+	elif _highlight_item != null:
+		_highlight_item.visible = true
 	if cave_view:
 		_update_local_view_rect()
 		_draw_caves()
@@ -920,10 +935,8 @@ func _draw() -> void:
 		_draw_underwater()
 		return
 
-	_wave_batches = [PackedVector2Array(),PackedVector2Array(),PackedVector2Array()]
-	for coordinate: Vector2i in _ordered_coordinates:
-		if _is_dynamic_layer and not _water_profiles.has(coordinate) and posmod(coordinate.x * 17 + coordinate.y * 31, 5) != 0:
-			continue
+	_wave_batches = [[],[],[]]
+	for coordinate: Vector2i in (_effect_coordinates if _is_dynamic_layer else _ordered_coordinates):
 		var tile_position: Vector2 = _terrain_positions.get(coordinate,Vector2.ZERO)
 		if not _is_on_screen(tile_position, 400.0 if _mountain_profiles.has(coordinate) else 100.0):
 			continue
@@ -935,51 +948,97 @@ func _draw() -> void:
 			_draw_tile(coordinate, _tiles[coordinate], tile_position)
 			var ancient: Dictionary = _tiles[coordinate].get("metadata", {}).get("ancient_site", {})
 			if not ancient.is_empty():
-				draw_set_transform(tile_position)
-				preload("res://scripts/world/AntiquityVisuals.gd").paint(self, str(ancient.get("kind", "inscription")))
-				draw_set_transform(Vector2.ZERO)
+				_canvas().draw_set_transform(tile_position)
+				preload("res://scripts/world/AntiquityVisuals.gd").paint(_canvas(), str(ancient.get("kind", "inscription")))
+				_canvas().draw_set_transform(Vector2.ZERO)
 
 	if not _is_dynamic_layer:
 		return
 	_flush_water_waves()
 
-	# Sort all upright objects together by their ground contact point.
-	var objects: Array[Dictionary] = []
-	for item: Dictionary in _static_depth_objects:
-		if _is_on_screen(item.base,180.0):
-			objects.append(item)
+	# Static scenery is sorted only when world data changes. Merge moving
+	# citizens into that order instead of sorting every tree and cliff per frame.
+	var moving: Array[Dictionary] = []
 	for entity: Dictionary in _ordered_entities:
 		var key := str(entity.get("id", "%s,%s" % [entity.x, entity.y]))
 		var visual: Vector2 = _entity_visual_positions.get(key, Vector2(entity.x, entity.y))
-		objects.append({"kind": "entity", "data": entity, "base": _map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO))})
-	objects = objects.filter(func(item: Dictionary) -> bool: return _is_on_screen(item.base, 180.0))
-	for item: Dictionary in objects:
-		if item.kind != "entity":
+		var base := _map_vector_to_local(visual) + Vector2(_crowd_offsets.get(key, Vector2.ZERO))
+		if _is_on_screen(base,180.0):
+			moving.append({"kind":"entity","data":entity,"base":base,"sort_y":(visual.x+visual.y)*tile_height*.5})
+	moving.sort_custom(_sort_ground_objects)
+	var objects: Array[Dictionary] = []
+	var cursor := 0
+	for item: Dictionary in _static_depth_objects:
+		if not _is_on_screen(item.base,180.0) and item.kind != "mountain":
 			continue
-		var at := Vector2(float(item.data.x),float(item.data.y))
-		if item.kind == "entity":
-			at = _entity_visual_positions.get(str(item.data.id),at)
-		item.sort_y = (at.x+at.y)*tile_height*.5 - (.1 if item.kind == "terrace" else 0)
-	objects.sort_custom(_sort_ground_objects)
-	for object: Dictionary in objects:
-		if not _is_on_screen(object.base, 180.0):
-			continue
-		match object.kind:
-			"terrace":
-				var at := Vector2i(int(object.data.x),int(object.data.y))
-				if object.get("edge",false):
-					Elevation.faces(self,at,object.base)
-					Elevation.illustrated(self,at,object.base)
-					_draw_terrain_sprite(object.base,str(_tiles[at].get("terrain","grass")).to_lower(),int(_tiles[at].get("metadata",{}).get("variant",0)),at)
-				if _elevated_scenery.has(at):
-					draw_mesh(_elevated_scenery[at],null)
-			"resource": _draw_depth_resource(object.data)
-			"structure": _draw_structure(object.base, object.data)
-			"entity": _draw_depth_entity(object.data)
-			"entrance": _interior_prop("entrance", object.base+Vector2(0,9),73)
+		while cursor < moving.size() and _sort_ground_objects(moving[cursor],item):
+			objects.append(moving[cursor])
+			cursor += 1
+		objects.append(item)
+	while cursor < moving.size():
+		objects.append(moving[cursor])
+		cursor += 1
+	_sync_depth_items(objects)
 
-	_draw_highlight(_hovered_tile, HOVER_COLOR, 1.5)
-	_draw_highlight(_selected_tile, SELECTED_COLOR, 2.5)
+
+func _paint_depth_item(object: Dictionary) -> void:
+	match object.kind:
+		"terrace":
+			var at := Vector2i(int(object.data.x),int(object.data.y))
+			if object.get("edge",false):
+				Elevation.faces(self,at,object.base)
+				Elevation.illustrated(self,at,object.base)
+				_draw_terrain_sprite(object.base,str(_tiles[at].get("terrain","grass")).to_lower(),int(_tiles[at].get("metadata",{}).get("variant",0)),at)
+			if _elevated_scenery.has(at):
+				_canvas().draw_mesh(_elevated_scenery[at],null)
+		"mountain": _draw_mountain(Vector2i(object.data.x,object.data.y),object.base,0.8)
+		"resource": _draw_depth_resource(object.data)
+		"structure": _draw_structure(object.base, object.data)
+		"entity": _draw_depth_entity(object.data)
+		"entrance": _interior_prop("entrance", object.base+Vector2(0,9),73)
+
+
+func _canvas() -> Node2D:
+	return _paint_target if _paint_target != null else self
+
+
+func _sync_depth_items(objects: Array[Dictionary]) -> void:
+	var seen := {}
+	var rank := 0
+	for item: Dictionary in objects:
+		var key := str(item.kind)+":"+str(item.data.get("id", ""))+":"+str(item.data.get("x",0))+":"+str(item.data.get("y",0))
+		if item.kind == "entity":
+			key = "entity:"+str(item.data.get("id", ""))
+		seen[key] = true
+		var node = _depth_items.get(key)
+		if node == null:
+			node = preload("res://scripts/world/RetainedDepthItem.gd").new()
+			node.renderer = self
+			node.self_modulate = self_modulate
+			node.phase = float(posmod(hash(key),100))*.001
+			add_child(node)
+			_depth_items[key] = node
+		var changed: bool = node.item != item
+		node.item = item
+		var was_visible: bool = node.visible
+		node.visible = true
+		RenderingServer.canvas_item_set_draw_index(node.get_canvas_item(),rank)
+		rank += 1
+		var animated: bool = item.kind in ["resource","structure"]
+		var waterfall: bool = item.kind == "terrace" and _water_profiles.has(Vector2i(item.data.x,item.data.y))
+		var effect_due: bool = floori((_visual_seconds+node.phase)*10) != floori((node.last_paint+node.phase)*10)
+		if changed or not was_visible or item.kind == "entity" or waterfall or (animated and effect_due):
+			node.queue_redraw()
+	for key: String in _depth_items:
+		if not seen.has(key):
+			_depth_items[key].visible = false
+	if _highlight_item == null:
+		_highlight_item = preload("res://scripts/world/RetainedDepthItem.gd").new()
+		_highlight_item.renderer = self
+		_highlight_item.highlight = true
+		add_child(_highlight_item)
+	RenderingServer.canvas_item_set_draw_index(_highlight_item.get_canvas_item(),rank)
+	_highlight_item.queue_redraw()
 
 
 func _sort_ground_objects(a: Dictionary, b: Dictionary) -> bool:
@@ -1059,26 +1118,25 @@ func _draw_tile(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) ->
 
 	var used_atlas_tile := _terrain_mesh != null or _draw_terrain_sprite(center, terrain, variant, coordinate)
 	if not used_atlas_tile and not _tiles.has(coordinate + Vector2i(1, 0)):
-		draw_colored_polygon(PackedVector2Array([
+		_canvas().draw_colored_polygon(PackedVector2Array([
 			diamond[1], diamond[2], diamond[2] + Vector2(0, slab_depth),
 			diamond[1] + Vector2(0, slab_depth)
 		]), RIGHT_EDGE_COLOR)
 	if not used_atlas_tile and not _tiles.has(coordinate + Vector2i(0, 1)):
-		draw_colored_polygon(PackedVector2Array([
+		_canvas().draw_colored_polygon(PackedVector2Array([
 			diamond[2], diamond[3], diamond[3] + Vector2(0, slab_depth),
 			diamond[2] + Vector2(0, slab_depth)
 		]), LEFT_EDGE_COLOR)
 
 	if not used_atlas_tile:
-		draw_colored_polygon(diamond, color)
+		_canvas().draw_colored_polygon(diamond, color)
 	_draw_layer_overlay(coordinate, diamond, tile_data)
 	if bool(tile_data.get("metadata", {}).get("flooded", false)):
-		draw_colored_polygon(diamond, Color(0.15, 0.47, 0.65, 0.65))
-		draw_line(center - Vector2(10, 0), center + Vector2(10, 0), Color("86c6d9"), 1.5)
+		_canvas().draw_colored_polygon(diamond, Color(0.15, 0.47, 0.65, 0.65))
+		_canvas().draw_line(center - Vector2(10, 0), center + Vector2(10, 0), Color("86c6d9"), 1.5)
 	if _draw_detail_level > 1 and terrain not in ["grass", "forest", "water", "ocean", "wetland", "swamp", "ice", "savanna"] and (not used_atlas_tile or terrain in ["meadow", "volcanic"]):
 		_draw_tile_details(coordinate, center, terrain, variant)
-	if _draw_detail_level > 0 and terrain == "mountain":
-		_draw_mountain(coordinate, center, float(tile_data.get("metadata", {}).get("elevation", 0.8)))
+
 
 
 
@@ -1097,8 +1155,8 @@ func _draw_shoreline(coordinate: Vector2i, diamond: PackedVector2Array) -> void:
 	for edge: int in shoreline_edges(coordinate):
 		var start := diamond[edge]
 		var end := diamond[(edge + 1) % 4]
-		draw_line(start, end, Color(0.35, 0.75, 0.77, 0.65), 5.0, true)
-		draw_line(start, end, Color(0.84, 0.94, 0.83, 0.7), 1.2, true)
+		_canvas().draw_line(start, end, Color(0.35, 0.75, 0.77, 0.65), 5.0, true)
+		_canvas().draw_line(start, end, Color(0.84, 0.94, 0.83, 0.7), 1.2, true)
 
 
 func _draw_dynamic_tile_effects(coordinate: Vector2i, tile_data: Dictionary, center: Vector2) -> void:
@@ -1147,19 +1205,26 @@ func _draw_terrain_sprite(center: Vector2, terrain: String, variant: int, coordi
 	# Continuous low-frequency variation, not a checkerboard of different tiles.
 	var variation := sin(float(coordinate.x) * 0.19 + float(coordinate.y) * 0.13) * 0.025
 	ground = ground.lightened(variation)
-	draw_colored_polygon(diamond, ground)
+	var cap_colors: PackedColorArray = _cap_color_cache.get(coordinate,PackedColorArray())
+	if cap_colors.is_empty():
+		for corner: int in range(4):
+			var color := _blended_ground_color(coordinate,corner)
+			color.a = 1.0
+			cap_colors.append(color)
+		_cap_color_cache[coordinate] = cap_colors
+	_canvas().draw_polygon(diamond,cap_colors)
 	# Sample INSIDE the top surface: never repeat the slab walls or transparent gutter.
 	var surface := PackedVector2Array([Vector2(104, 61), Vector2(162, 96), Vector2(104, 132), Vector2(47, 96)])
 	var uv := PackedVector2Array()
 	var shift := posmod(coordinate.x * 17 + coordinate.y * 31 + variant, 4)
 	for index: int in range(4):
 		uv.append((source.position + surface[(index + shift) % 4]) / _environment_atlas.get_size())
-	tint.a = 0.18
+	tint.a = 0.12
 	if terrain in ["snow", "tundra", "ice", "water", "ocean", "wetland", "swamp"]:
 		tint.a = 0.06
 	elif terrain in ["stone", "mountain"]:
 		tint.a = 0.3
-	draw_polygon(diamond, PackedColorArray([tint]), uv, _environment_atlas)
+	_canvas().draw_polygon(diamond, PackedColorArray([tint]), uv, _environment_atlas)
 	return true
 
 
@@ -1183,7 +1248,7 @@ func _draw_layer_overlay(coordinate: Vector2i, diamond: PackedVector2Array, tile
 			if _population_positions.has(coordinate):
 				overlay = Color(0.2, 0.95, 0.9, minf(0.35 + float(_population_positions[coordinate]) * 0.12, 0.8))
 	if overlay.a > 0.0:
-		draw_colored_polygon(diamond, overlay)
+		_canvas().draw_colored_polygon(diamond, overlay)
 
 
 func _terrain_variant_color(base_color: Color, variant: int) -> Color:
@@ -1202,50 +1267,50 @@ func _draw_tile_details(coordinate: Vector2i, center: Vector2, terrain: String, 
 				var blade_color := Color("168e4c") if terrain == "grass" else Color("087a43")
 				for offset: Vector2 in [Vector2(-12, 3), Vector2(-7, 5), Vector2(9, 2)]:
 					var blade_push := _wind_vector() * _gust(center + offset, 2.0) * 2.4
-					draw_line(center + offset, center + offset + Vector2(2, -5) + blade_push, blade_color, 1.2)
+					_canvas().draw_line(center + offset, center + offset + Vector2(2, -5) + blade_push, blade_color, 1.2)
 			if detail_seed == 7:
 				var flower_colors: Array[Color] = [Color("f5d76e"), Color("ef7f91"), Color("c69af1"), Color("f4f0e6")]
 				var flower_color: Color = flower_colors[variant]
 				for offset: Vector2 in [Vector2(-9, 1), Vector2(4, -2), Vector2(11, 3)]:
-					draw_circle(center + offset, 1.8, flower_color)
+					_canvas().draw_circle(center + offset, 1.8, flower_color)
 		"meadow":
 			if detail_seed in [2, 7, 11]:
 				var meadow_colors: Array[Color] = [Color("fff1a8"), Color("f7a6bd"), Color("b9a7ff"), Color("f5f1de")]
 				for index: int in range(3):
 					var offset := Vector2(-10 + index * 9, 1 + (index % 2) * 3)
-					draw_circle(center + offset, 1.5, meadow_colors[(variant + index) % meadow_colors.size()])
+					_canvas().draw_circle(center + offset, 1.5, meadow_colors[(variant + index) % meadow_colors.size()])
 		"dirt", "desert", "sand":
 			if detail_seed < 4:
-				draw_line(center + Vector2(-11, 1), center + Vector2(-4, 4), Color(0.35, 0.22, 0.12, 0.32), 1.0)
-				draw_circle(center + Vector2(10, 2), 1.5, Color(0.35, 0.22, 0.12, 0.3))
+				_canvas().draw_line(center + Vector2(-11, 1), center + Vector2(-4, 4), Color(0.35, 0.22, 0.12, 0.32), 1.0)
+				_canvas().draw_circle(center + Vector2(10, 2), 1.5, Color(0.35, 0.22, 0.12, 0.3))
 		"water", "ocean":
 			var wave_color := Color(0.62, 0.88, 1.0, 0.55) if terrain == "water" else Color(0.35, 0.72, 0.96, 0.48)
-			draw_line(center + Vector2(-12, 1), center + Vector2(-2, -4), wave_color, 1.2)
+			_canvas().draw_line(center + Vector2(-12, 1), center + Vector2(-2, -4), wave_color, 1.2)
 			if detail_seed % 3 == 0:
-				draw_line(center + Vector2(5, 5), center + Vector2(13, 1), wave_color, 1.0)
+				_canvas().draw_line(center + Vector2(5, 5), center + Vector2(13, 1), wave_color, 1.0)
 		"wetland":
 			if detail_seed < 5:
 				for offset_x: float in [-10.0, -5.0, 8.0]:
 					var reed_push := _wind_vector() * _gust(center + Vector2(offset_x, 0), 2.5) * 3.2
-					draw_line(center + Vector2(offset_x, 5), center + Vector2(offset_x + 2, -4) + reed_push, Color("356c45"), 1.4)
+					_canvas().draw_line(center + Vector2(offset_x, 5), center + Vector2(offset_x + 2, -4) + reed_push, Color("356c45"), 1.4)
 		"swamp":
 			if detail_seed < 4:
-				draw_circle(center + Vector2(-7, 1), 3.0, Color("477d57"))
-				draw_line(center + Vector2(8, 5), center + Vector2(10, -5), Color("294f36"), 1.4)
+				_canvas().draw_circle(center + Vector2(-7, 1), 3.0, Color("477d57"))
+				_canvas().draw_line(center + Vector2(8, 5), center + Vector2(10, -5), Color("294f36"), 1.4)
 		"savanna":
 			if detail_seed < 4:
 				for offset_x: float in [-9.0, 7.0]:
-					draw_line(center + Vector2(offset_x, 5), center + Vector2(offset_x + 3, -3), Color("8c6a2e"), 1.2)
+					_canvas().draw_line(center + Vector2(offset_x, 5), center + Vector2(offset_x + 3, -3), Color("8c6a2e"), 1.2)
 		"volcanic":
 			if detail_seed < 3:
-				draw_polyline(PackedVector2Array([center + Vector2(-11, 1), center + Vector2(-3, -2), center + Vector2(2, 3), center + Vector2(10, -1)]), Color("d85b35"), 1.5)
+				_canvas().draw_polyline(PackedVector2Array([center + Vector2(-11, 1), center + Vector2(-3, -2), center + Vector2(2, 3), center + Vector2(10, -1)]), Color("d85b35"), 1.5)
 		"snow":
 			if detail_seed < 5:
-				draw_circle(center + Vector2(-8, 1), 1.2, Color.WHITE)
-				draw_circle(center + Vector2(9, -1), 1.0, Color.WHITE)
+				_canvas().draw_circle(center + Vector2(-8, 1), 1.2, Color.WHITE)
+				_canvas().draw_circle(center + Vector2(9, -1), 1.0, Color.WHITE)
 		"ice":
 			if detail_seed < 7:
-				draw_polyline(PackedVector2Array([center + Vector2(-10, -1), center + Vector2(-2, 2), center + Vector2(4, -3), center + Vector2(11, 1)]), Color(0.82, 0.97, 1.0, 0.75), 1.1)
+				_canvas().draw_polyline(PackedVector2Array([center + Vector2(-10, -1), center + Vector2(-2, 2), center + Vector2(4, -3), center + Vector2(11, 1)]), Color(0.82, 0.97, 1.0, 0.75), 1.1)
 
 
 func _cache_mountain_profiles() -> void:
@@ -1310,12 +1375,12 @@ func _draw_mountain(coordinate: Vector2i, tile_center: Vector2, elevation: float
 		if not _mountain_profiles.has(coordinate):
 			return
 		var size: Vector2 = _mountain_profiles[coordinate]
-		draw_texture_rect(_ridge_texture, Rect2(tile_center + Vector2(-size.x * 0.5, -size.y + 14), size), false)
+		_canvas().draw_texture_rect(_ridge_texture, Rect2(tile_center + Vector2(-size.x * 0.5, -size.y + 14), size), false)
 		return
 	var variation: int = posmod(coordinate.x * 17 + coordinate.y * 31, 11)
 	var is_major_peak: bool = variation < 5 or elevation > 0.86
 	var shadow_center := tile_center + Vector2(5, 7)
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		shadow_center + Vector2(-22, 0), shadow_center + Vector2(0, -8),
 		shadow_center + Vector2(25, 0), shadow_center + Vector2(0, 10)
 	]), Color(0.05, 0.09, 0.10, 0.25))
@@ -1347,18 +1412,18 @@ func _draw_rock_peak(base: Vector2, half_width: float, height: float, lean: floa
 	var foot := base + Vector2(2, 12)
 
 	# Warm and cool faces create a readable low-poly rock mass.
-	draw_colored_polygon(PackedVector2Array([peak, left, foot]), Color("87949a"))
-	draw_colored_polygon(PackedVector2Array([peak, foot, right]), Color("3d4b53"))
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([peak, left, foot]), Color("87949a"))
+	_canvas().draw_colored_polygon(PackedVector2Array([peak, foot, right]), Color("3d4b53"))
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		peak + Vector2(-2, height * 0.34), left + Vector2(7, -2), foot
 	]), Color("6d7a80"))
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		peak + Vector2(2, height * 0.43), foot, right + Vector2(-7, -1)
 	]), Color("536169"))
 
 	if snowy:
 		var snow_depth: float = height * 0.27
-		draw_colored_polygon(PackedVector2Array([
+		_canvas().draw_colored_polygon(PackedVector2Array([
 			peak,
 			peak + Vector2(-half_width * 0.31, snow_depth),
 			peak + Vector2(-3, snow_depth * 0.72),
@@ -1372,7 +1437,7 @@ func _draw_highlight(coordinate: Vector2i, color: Color, width: float) -> void:
 		return
 	var diamond := _diamond_at(map_to_local(coordinate))
 	var outline := PackedVector2Array([diamond[0], diamond[1], diamond[2], diamond[3], diamond[0]])
-	draw_polyline(outline, color, width, true)
+	_canvas().draw_polyline(outline, color, width, true)
 
 
 func _draw_tree(tile_center: Vector2, growth: float, variant: int, produce_ratio: float) -> void:
@@ -1392,17 +1457,17 @@ func _draw_tree(tile_center: Vector2, growth: float, variant: int, produce_ratio
 	var trunk_top := base + Vector2(0, -trunk_height)
 
 	# A small isometric ground shadow seats the tree on its terrain tile.
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(0, -4), base + Vector2(9, 0),
 		base + Vector2(0, 4), base + Vector2(-9, 0)
 	]), Color(0.0, 0.25, 0.12, 0.42))
 
 	# Two trunk faces make the narrow rectangular trunk read as a solid prism.
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(-5, 0), base + Vector2(0, 3),
 		trunk_top + Vector2(0, 3), trunk_top + Vector2(-5, 0)
 	]), Color("704124"))
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(0, 3), base + Vector2(5, 0),
 		trunk_top + Vector2(5, 0), trunk_top + Vector2(0, 3)
 	]), Color("4f2b19"))
@@ -1415,13 +1480,13 @@ func _draw_tree(tile_center: Vector2, growth: float, variant: int, produce_ratio
 	var crown_left := crown_center + Vector2(-crown_width, 0)
 	var crown_drop := Vector2(0, crown_height)
 
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		crown_left, crown_bottom, crown_bottom + crown_drop, crown_left + crown_drop
 	]), Color("006c34"))
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		crown_bottom, crown_right, crown_right + crown_drop, crown_bottom + crown_drop
 	]), Color("008a49"))
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		crown_top, crown_right, crown_bottom, crown_left
 	]), Color("239c67"))
 
@@ -1429,11 +1494,11 @@ func _draw_tree(tile_center: Vector2, growth: float, variant: int, produce_ratio
 func _draw_conifer(tile_center: Vector2, growth: float) -> void:
 	var base := tile_center + Vector2(0, 4)
 	var height: float = 28.0 + growth * 25.0
-	draw_line(base, base + Vector2(0, -height * 0.55), Color("56351f"), 4.0)
+	_canvas().draw_line(base, base + Vector2(0, -height * 0.55), Color("56351f"), 4.0)
 	for layer: int in range(3):
 		var layer_y: float = -height + float(layer) * height * 0.23
 		var half_width: float = 10.0 + float(layer) * 5.5 + growth * 3.0
-		draw_colored_polygon(PackedVector2Array([
+		_canvas().draw_colored_polygon(PackedVector2Array([
 			base + Vector2(0, layer_y),
 			base + Vector2(half_width, layer_y + 18),
 			base + Vector2(0, layer_y + 13),
@@ -1444,18 +1509,18 @@ func _draw_conifer(tile_center: Vector2, growth: float) -> void:
 func _draw_deciduous_tree(tile_center: Vector2, growth: float, produce_ratio: float) -> void:
 	var base := tile_center + Vector2(0, 4)
 	var trunk_top := base + Vector2(0, -(16.0 + growth * 14.0))
-	draw_line(base, trunk_top, Color("62402a"), 5.0)
+	_canvas().draw_line(base, trunk_top, Color("62402a"), 5.0)
 	var radius: float = 10.0 + growth * 7.0
-	draw_circle(trunk_top + Vector2(-7, -4), radius * 0.75, Color("128550"))
-	draw_circle(trunk_top + Vector2(8, -5), radius * 0.78, Color("0b6f43"))
-	draw_circle(trunk_top + Vector2(0, -13), radius, Color("25a860"))
+	_canvas().draw_circle(trunk_top + Vector2(-7, -4), radius * 0.75, Color("128550"))
+	_canvas().draw_circle(trunk_top + Vector2(8, -5), radius * 0.78, Color("0b6f43"))
+	_canvas().draw_circle(trunk_top + Vector2(0, -13), radius, Color("25a860"))
 	var fruit_count: int = roundi(clampf(produce_ratio, 0.0, 1.0) * 7.0)
 	var fruit_offsets: Array[Vector2] = [
 		Vector2(-9, -12), Vector2(8, -15), Vector2(1, -23), Vector2(-13, -4),
 		Vector2(13, -7), Vector2(-3, -7), Vector2(6, -3)
 	]
 	for index: int in range(fruit_count):
-		draw_circle(trunk_top + fruit_offsets[index], 2.2, Color("e5533d"))
+		_canvas().draw_circle(trunk_top + fruit_offsets[index], 2.2, Color("e5533d"))
 
 
 func _draw_stone(tile_center: Vector2, capacity: float, variant: int) -> void:
@@ -1465,14 +1530,14 @@ func _draw_stone(tile_center: Vector2, capacity: float, variant: int) -> void:
 	var left := base + Vector2(-13 * size, -5 * size)
 	var right := base + Vector2(13 * size, -5 * size)
 	var bottom := base + Vector2(0, 3)
-	draw_colored_polygon(PackedVector2Array([top, left, bottom]), Color("68747c"))
-	draw_colored_polygon(PackedVector2Array([top, right, bottom]), Color("536069"))
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([top, left, bottom]), Color("68747c"))
+	_canvas().draw_colored_polygon(PackedVector2Array([top, right, bottom]), Color("536069"))
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		top + Vector2(0, -5), right + Vector2(-3, -5), top, left + Vector2(3, -5)
 	]), Color("aeb8bd"))
 	if variant >= 2:
 		var small_base := base + Vector2(12, 4)
-		draw_colored_polygon(PackedVector2Array([
+		_canvas().draw_colored_polygon(PackedVector2Array([
 			small_base + Vector2(0, -8), small_base + Vector2(8, -2),
 			small_base + Vector2(1, 3), small_base + Vector2(-7, -2)
 		]), Color("69767d"))
@@ -1483,74 +1548,74 @@ func _draw_plant(tile_center: Vector2, growth: float, variant: int) -> void:
 	var height := 4.0 + 9.0 * growth
 	var spread := 3.0 + 6.0 * growth
 	var tip_push := _wind_vector() * _gust(tile_center, 2.8) * 3.2 * growth
-	draw_line(base, base + Vector2(0, -height) + tip_push, Color("356b2f"), 2.0)
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_line(base, base + Vector2(0, -height) + tip_push, Color("356b2f"), 2.0)
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(0, -height) + tip_push, base + Vector2(spread, -height + 3) + tip_push,
 		base + Vector2(0, -height + 6) + tip_push, base + Vector2(-spread, -height + 3) + tip_push
 	]), Color("65bd4f"))
 	var flower_colors: Array[Color] = [Color("f3c85b"), Color("e87991"), Color("b98ce8"), Color("f2eee2")]
-	draw_circle(base + Vector2(0, -height - 1) + tip_push, 2.2 + growth, flower_colors[variant])
+	_canvas().draw_circle(base + Vector2(0, -height - 1) + tip_push, 2.2 + growth, flower_colors[variant])
 
 
 func _draw_bush(tile_center: Vector2, growth: float, variant: int) -> void:
 	var radius: float = 6.0 + growth * 5.0
 	var base := tile_center + Vector2(0, 1) + _wind_vector() * _gust(tile_center, 1.7) * 1.8
 	var bush_color := Color("2d9a4f") if variant % 2 == 0 else Color("3baa55")
-	draw_circle(base + Vector2(-8, -5), radius, bush_color.darkened(0.12))
-	draw_circle(base + Vector2(7, -6), radius * 0.95, bush_color.darkened(0.05))
-	draw_circle(base + Vector2(0, -11), radius * 1.1, bush_color)
+	_canvas().draw_circle(base + Vector2(-8, -5), radius, bush_color.darkened(0.12))
+	_canvas().draw_circle(base + Vector2(7, -6), radius * 0.95, bush_color.darkened(0.05))
+	_canvas().draw_circle(base + Vector2(0, -11), radius * 1.1, bush_color)
 	if variant >= 2:
 		var berry_color := Color("e45d64") if variant == 2 else Color("7259c7")
 		for offset: Vector2 in [Vector2(-6, -10), Vector2(4, -14), Vector2(8, -6)]:
-			draw_circle(base + offset, 1.8, berry_color)
+			_canvas().draw_circle(base + offset, 1.8, berry_color)
 
 
 func _draw_mushrooms(tile_center: Vector2, variant: int) -> void:
 	var cap_colors: Array[Color] = [Color("dc5b45"), Color("e7a84a"), Color("b877d1"), Color("e9dfc6")]
 	for offset: Vector2 in [Vector2(-8, 2), Vector2(2, -2), Vector2(9, 3)]:
 		var height: float = 7.0 + float(posmod(int(offset.x) + variant, 4))
-		draw_line(tile_center + offset, tile_center + offset + Vector2(0, -height), Color("e3d6b7"), 2.4)
-		draw_circle(tile_center + offset + Vector2(0, -height), 4.0, cap_colors[variant])
+		_canvas().draw_line(tile_center + offset, tile_center + offset + Vector2(0, -height), Color("e3d6b7"), 2.4)
+		_canvas().draw_circle(tile_center + offset + Vector2(0, -height), 4.0, cap_colors[variant])
 		if variant == 0:
-			draw_circle(tile_center + offset + Vector2(-1, -height - 1), 0.8, Color.WHITE)
+			_canvas().draw_circle(tile_center + offset + Vector2(-1, -height - 1), 0.8, Color.WHITE)
 
 
 func _draw_log(tile_center: Vector2) -> void:
 	var start := tile_center + Vector2(-17, 3)
 	var finish := tile_center + Vector2(15, -6)
-	draw_line(start, finish, Color("70452a"), 10.0)
-	draw_circle(finish, 5.2, Color("c18a55"))
-	draw_circle(finish, 2.6, Color("815331"))
-	draw_line(start + Vector2(8, -3), start + Vector2(4, -12), Color("4e7b3b"), 2.0)
+	_canvas().draw_line(start, finish, Color("70452a"), 10.0)
+	_canvas().draw_circle(finish, 5.2, Color("c18a55"))
+	_canvas().draw_circle(finish, 2.6, Color("815331"))
+	_canvas().draw_line(start + Vector2(8, -3), start + Vector2(4, -12), Color("4e7b3b"), 2.0)
 
 
 func _draw_stump(tile_center: Vector2) -> void:
 	var base := tile_center + Vector2(0, 4)
-	draw_rect(Rect2(base + Vector2(-8, -12), Vector2(16, 13)), Color("70462b"))
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_rect(Rect2(base + Vector2(-8, -12), Vector2(16, 13)), Color("70462b"))
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(0, -17), base + Vector2(9, -12),
 		base + Vector2(0, -7), base + Vector2(-9, -12)
 	]), Color("c28b52"))
-	draw_circle(base + Vector2(0, -12), 3.0, Color("80542f"), false, 1.2)
+	_canvas().draw_circle(base + Vector2(0, -12), 3.0, Color("80542f"), false, 1.2)
 
 
 func _draw_reeds(tile_center: Vector2) -> void:
 	for offset_x: float in [-9.0, -4.0, 1.0, 6.0, 11.0]:
 		var height: float = 12.0 + fmod(abs(offset_x) * 2.0, 7.0)
 		var push := _wind_vector() * _gust(tile_center + Vector2(offset_x, 0), 3.2) * 4.0
-		draw_line(tile_center + Vector2(offset_x, 5), tile_center + Vector2(offset_x + 2, 5 - height) + push, Color("47783b"), 1.8)
-		draw_line(tile_center + Vector2(offset_x + 2, 5 - height) + push, tile_center + Vector2(offset_x + 5, 8 - height) + push, Color("78a94c"), 1.5)
+		_canvas().draw_line(tile_center + Vector2(offset_x, 5), tile_center + Vector2(offset_x + 2, 5 - height) + push, Color("47783b"), 1.8)
+		_canvas().draw_line(tile_center + Vector2(offset_x + 2, 5 - height) + push, tile_center + Vector2(offset_x + 5, 8 - height) + push, Color("78a94c"), 1.5)
 
 
 func _draw_lily(tile_center: Vector2, variant: int) -> void:
 	var base := tile_center + Vector2(0, 2)
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(0, -5), base + Vector2(10, 0),
 		base + Vector2(2, 5), base + Vector2(-9, 1)
 	]), Color("4b9c52"))
 	if variant >= 1:
 		var flower_color := Color("f2a8cb") if variant % 2 == 1 else Color("f3e9cc")
-		draw_circle(base + Vector2(1, -4), 3.0, flower_color)
+		_canvas().draw_circle(base + Vector2(1, -4), 3.0, flower_color)
 
 
 func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
@@ -1573,21 +1638,21 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 		var length := 12 if completed else maxi(1,int(progress*12))
 		for plank: int in range(length):
 			var point := tile_center+axis*(float(plank)/11-.5)
-			draw_line(point-side,point+side,Color("ad8052"),4)
+			_canvas().draw_line(point-side,point+side,Color("ad8052"),4)
 		if completed:
 			for sign_value: int in [-1,1]:
 				var offset := side*sign_value
 				for post: int in range(3):
 					var foot := tile_center+axis*(float(post)/2-.5)+offset
-					draw_line(foot,foot-Vector2(0,13),Color("68503a"),3)
-				draw_line(tile_center-axis*.5+offset-Vector2(0,11),tile_center+axis*.5+offset-Vector2(0,11),Color("94724c"),3)
+					_canvas().draw_line(foot,foot-Vector2(0,13),Color("68503a"),3)
+				_canvas().draw_line(tile_center-axis*.5+offset-Vector2(0,11),tile_center+axis*.5+offset-Vector2(0,11),Color("94724c"),3)
 		return
 	if kind == "road":
 		var road_color := Color("a89a79") if completed else Color("6f6655")
-		draw_colored_polygon(_diamond_at(tile_center), Color(road_color, 0.8))
+		_canvas().draw_colored_polygon(_diamond_at(tile_center), Color(road_color, 0.8))
 		for stone_index: int in range(5 if completed else maxi(1, int(progress * 5))):
 			var stone_center := tile_center + Vector2((stone_index % 3 - 1) * 13, (stone_index / 3) * 9 - 4)
-			draw_line(stone_center - Vector2(4, 0), stone_center + Vector2(4, 0), Color("d6c8a5"), 3.0)
+			_canvas().draw_line(stone_center - Vector2(4, 0), stone_center + Vector2(4, 0), Color("d6c8a5"), 3.0)
 		return
 	if not completed:
 		_draw_construction_site(base, structure, kind, progress, funded)
@@ -1595,9 +1660,9 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 	if kind in ["campfire", "torch"] and float(structure.get("fuel", 0.0)) <= 0.0:
 		for angle: int in range(0, 360, 45):
 			var stone := base + Vector2.from_angle(deg_to_rad(angle)) * Vector2(13, 6)
-			draw_circle(stone, 4.0, Color("747778"))
-		draw_line(base + Vector2(-9, -4), base + Vector2(9, 2), Color("55483d"), 4.0)
-		draw_line(base + Vector2(-9, 2), base + Vector2(9, -4), Color("55483d"), 4.0)
+			_canvas().draw_circle(stone, 4.0, Color("747778"))
+		_canvas().draw_line(base + Vector2(-9, -4), base + Vector2(9, 2), Color("55483d"), 4.0)
+		_canvas().draw_line(base + Vector2(-9, 2), base + Vector2(9, -4), Color("55483d"), 4.0)
 		return
 	if _draw_buildable_sprite(base, kind):
 		if kind in ["shelter","house","home"] and _draw_detail_level > 0 and _occupied_homes.has(Vector2i(int(structure.get("x",0)),int(structure.get("y",0)))):
@@ -1605,28 +1670,28 @@ func _draw_structure(tile_center: Vector2, structure: Dictionary) -> void:
 				# Occupied homes air linen during dry daylight; subtle wind only.
 				var a := base+Vector2(31,-10)
 				var b := base+Vector2(51,-2)
-				draw_line(a+Vector2(0,13),a,Color("6f6048"),1.5)
-				draw_line(b+Vector2(0,13),b,Color("6f6048"),1.5)
-				draw_line(a,b,Color("b2ab8e"),1)
+				_canvas().draw_line(a+Vector2(0,13),a,Color("6f6048"),1.5)
+				_canvas().draw_line(b+Vector2(0,13),b,Color("6f6048"),1.5)
+				_canvas().draw_line(a,b,Color("b2ab8e"),1)
 				for cloth: int in range(2):
 					var at := a.lerp(b,0.25+cloth*0.4)
 					var sway := sin(_visual_seconds*1.4+cloth)*minf(_wind_speed*0.12,1.2)
-					draw_colored_polygon(PackedVector2Array([at,at+Vector2(5,2),at+Vector2(5+sway,9),at+Vector2(sway,7)]),Color("d1c7a6") if cloth == 0 else Color("a3b5b1"))
+					_canvas().draw_colored_polygon(PackedVector2Array([at,at+Vector2(5,2),at+Vector2(5+sway,9),at+Vector2(sway,7)]),Color("d1c7a6") if cloth == 0 else Color("a3b5b1"))
 			if _night_light:
-				draw_circle(base + Vector2(-34,-54),8,Color(1.0,0.68,0.27,0.08))
-				draw_rect(Rect2(base+Vector2(-36,-58),Vector2(5,7)),Color(1.0,0.76,0.40,0.5))
+				_canvas().draw_circle(base + Vector2(-34,-54),8,Color(1.0,0.68,0.27,0.08))
+				_canvas().draw_rect(Rect2(base+Vector2(-36,-58),Vector2(5,7)),Color(1.0,0.76,0.40,0.5))
 			if _temperature_c < 12.0:
 				for puff: int in range(3):
 					var age := fposmod(_visual_seconds * 0.15 + puff / 3.0,1.0)
 					var at := base + Vector2(31,-130) + _wind_vector()*age*12 + Vector2(0,-age*22)
-					draw_circle(at,2+age*4,Color(0.78,0.81,0.79,sin(age*PI)*0.12))
+					_canvas().draw_circle(at,2+age*4,Color(0.78,0.81,0.79,sin(age*PI)*0.12))
 		if kind == "campfire":
 			_draw_fire_physics(base + Vector2(0, -13), float(structure.get("fuel", 0.0)))
 		elif kind == "farm":
 			_draw_crop_motion(base, structure)
 		return
 	if kind == "torch":
-		draw_line(base, base + Vector2(0, -31), Color("694328"), 4.0)
+		_canvas().draw_line(base, base + Vector2(0, -31), Color("694328"), 4.0)
 		_draw_fire_physics(base + Vector2(0, -36), float(structure.get("fuel", 0.0)))
 
 
@@ -1641,18 +1706,18 @@ func _draw_construction_site(base: Vector2, structure: Dictionary, kind: String,
 	var supply_ratio := delivered_total / maxf(required_total, 1.0)
 	var stage := clampf(progress, 0.0, 1.0)
 	# A stone footing stays visible throughout construction and anchors the site.
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(0, -7), base + Vector2(27, 1),
 		base + Vector2(0, 11), base + Vector2(-27, 1)
 	]), Color("6e716d"))
 	for stone_index: int in range(6):
 		var stone_at := base + Vector2(-19 + stone_index * 8, -2 + (stone_index % 2) * 5)
-		draw_line(stone_at, stone_at + Vector2(6, 2), Color("a8aaa2"), 2.5)
+		_canvas().draw_line(stone_at, stone_at + Vector2(6, 2), Color("a8aaa2"), 2.5)
 	# Delivered materials are physical piles, not a decorative completion badge.
 	for pile: int in range(ceili(supply_ratio * 5.0)):
 		var pile_at := base + Vector2(-31 + pile * 8, 7 - (pile % 2) * 4)
-		draw_line(pile_at, pile_at + Vector2(9, -3), Color("a66c3b"), 4.0)
-		draw_circle(pile_at + Vector2(9, -3), 2.0, Color("d2a46c"))
+		_canvas().draw_line(pile_at, pile_at + Vector2(9, -3), Color("a66c3b"), 4.0)
+		_canvas().draw_circle(pile_at + Vector2(9, -3), 2.0, Color("d2a46c"))
 	if funded and stage > 0.0 and _buildables_atlas != null:
 		var source := _buildable_region(kind)
 		if source.size.x > 0.0:
@@ -1660,20 +1725,20 @@ func _draw_construction_site(base: Vector2, structure: Dictionary, kind: String,
 			var visible_height := maxf(1.0, source.size.y * stage)
 			var source_slice := Rect2(source.position + Vector2(0, source.size.y - visible_height), Vector2(source.size.x, visible_height))
 			var destination_slice := Rect2(destination.position + Vector2(0, destination.size.y * (1.0 - stage)), Vector2(destination.size.x, destination.size.y * stage))
-			draw_texture_rect_region(_buildables_atlas, destination_slice, source_slice, Color(1, 1, 1, 0.92))
+			_canvas().draw_texture_rect_region(_buildables_atlas, destination_slice, source_slice, Color(1, 1, 1, 0.92))
 	# Scaffolding communicates the current physical stage without replacing it.
 	if funded:
 		var beam_height := 15.0 + stage * 49.0
 		for side: float in [-1.0, 1.0]:
-			draw_line(base + Vector2(side * 31, 4), base + Vector2(side * 31, -beam_height), Color("795033"), 3.0)
-		draw_line(base + Vector2(-33, -beam_height), base + Vector2(33, -beam_height), Color("b8844f"), 3.0)
+			_canvas().draw_line(base + Vector2(side * 31, 4), base + Vector2(side * 31, -beam_height), Color("795033"), 3.0)
+		_canvas().draw_line(base + Vector2(-33, -beam_height), base + Vector2(33, -beam_height), Color("b8844f"), 3.0)
 		if stage > 0.35:
-			draw_line(base + Vector2(-31, -8), base + Vector2(31, -beam_height + 4), Color("9a693e"), 2.0)
+			_canvas().draw_line(base + Vector2(-31, -8), base + Vector2(31, -beam_height + 4), Color("9a693e"), 2.0)
 	else:
-		draw_dashed_line(base + Vector2(-28, -10), base + Vector2(28, -10), Color("72d6bb"), 1.5, 5.0)
-	draw_rect(Rect2(base + Vector2(-28, 15), Vector2(56, 4)), Color("1b302e"))
+		_canvas().draw_dashed_line(base + Vector2(-28, -10), base + Vector2(28, -10), Color("72d6bb"), 1.5, 5.0)
+	_canvas().draw_rect(Rect2(base + Vector2(-28, 15), Vector2(56, 4)), Color("1b302e"))
 	var shown_progress := stage if funded else supply_ratio
-	draw_rect(Rect2(base + Vector2(-27, 16), Vector2(54 * shown_progress, 2)), Color("dbbd80") if funded else Color("e6a25a"))
+	_canvas().draw_rect(Rect2(base + Vector2(-27, 16), Vector2(54 * shown_progress, 2)), Color("dbbd80") if funded else Color("e6a25a"))
 
 
 func _draw_buildable_sprite(base: Vector2, kind: String, modulate := Color.WHITE) -> bool:
@@ -1682,7 +1747,7 @@ func _draw_buildable_sprite(base: Vector2, kind: String, modulate := Color.WHITE
 	var source := _buildable_region(kind)
 	if source.size.x <= 0.0:
 		return false
-	draw_texture_rect_region(_buildables_atlas, _buildable_destination(base, kind, source), source, modulate)
+	_canvas().draw_texture_rect_region(_buildables_atlas, _buildable_destination(base, kind, source), source, modulate)
 	return true
 
 
@@ -1702,7 +1767,7 @@ func _draw_crop_motion(base: Vector2, structure: Dictionary) -> void:
 	for index: int in range(5):
 		var stem := base + Vector2(-18 + index * 9, -12 + (index % 2) * 4)
 		var push := _wind_vector() * _gust(stem, 2.0) * (1.0 + growth * 2.0)
-		draw_line(stem, stem + Vector2(0, -4 - growth * 8) + push, Color("d7b85c") if ripe else Color("70a84c"), 1.5)
+		_canvas().draw_line(stem, stem + Vector2(0, -4 - growth * 8) + push, Color("d7b85c") if ripe else Color("70a84c"), 1.5)
 
 
 func _draw_fire_physics(origin: Vector2, fuel: float) -> void:
@@ -1710,22 +1775,22 @@ func _draw_fire_physics(origin: Vector2, fuel: float) -> void:
 		return
 	if _night_light and _draw_detail_level > 0:
 		for ring: int in range(3):
-			draw_circle(origin + Vector2(0, 10), 24.0 - ring * 6.0, Color(1.0, 0.57, 0.19, 0.025))
+			_canvas().draw_circle(origin + Vector2(0, 10), 24.0 - ring * 6.0, Color(1.0, 0.57, 0.19, 0.025))
 	var gust := _gust(origin, 1.8)
 	var push := _wind_vector() * (3.0 + _wind_speed * 0.32) * gust
 	var flicker := 1.0 + sin(_visual_seconds * 13.0 + origin.x * 0.03) * 0.18
 	# Keep the flame convex even during a strong crosswind. A four-point flame can
 	# fold over itself and fail Godot's polygon triangulation at high gust values.
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		origin + Vector2(-5, 3),
 		origin + Vector2(0, -15 * flicker) + push,
 		origin + Vector2(6, 3)
 	]), Color(1.0, 0.45, 0.08, 0.78))
-	draw_circle(origin + Vector2(0, -2), 3.2 * flicker, Color(1.0, 0.86, 0.28, 0.88))
+	_canvas().draw_circle(origin + Vector2(0, -2), 3.2 * flicker, Color(1.0, 0.86, 0.28, 0.88))
 	for index: int in range(3):
 		var age := fmod(_visual_seconds * (0.55 + index * 0.08) + index * 0.31, 1.0)
 		var smoke := origin + Vector2(0, -14) + _wind_vector() * age * (12.0 + _wind_speed) + Vector2(0, -age * 22.0)
-		draw_circle(smoke, 2.0 + age * 3.5, Color(0.38, 0.42, 0.42, (1.0 - age) * 0.28))
+		_canvas().draw_circle(smoke, 2.0 + age * 3.5, Color(0.38, 0.42, 0.42, (1.0 - age) * 0.28))
 
 
 func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
@@ -1738,24 +1803,24 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 		var at := map_to_local(Vector2i(int(home.get("x", 0)), int(home.get("y", 0))))
 		if home.get("kind") == "nest":
 			at += Vector2(0, -25)
-			preload("res://scripts/world/NestVisuals.gd").paint(self, at, int(home.get("eggs", 0)), float(home.get("progress", 4)) / 4)
+			preload("res://scripts/world/NestVisuals.gd").paint(_canvas(), at, int(home.get("eggs", 0)), float(home.get("progress", 4)) / 4)
 		elif home.get("kind") in ["den", "burrow"]:
-			draw_set_transform(at, 0, Vector2(1, .6))
-			draw_circle(Vector2.ZERO, 10 if home.get("kind") == "den" else 6, Color("564c38"))
-			draw_circle(Vector2(0, -1), 5, Color("202723"))
-			draw_set_transform(Vector2.ZERO)
+			_canvas().draw_set_transform(at, 0, Vector2(1, .6))
+			_canvas().draw_circle(Vector2.ZERO, 10 if home.get("kind") == "den" else 6, Color("564c38"))
+			_canvas().draw_circle(Vector2(0, -1), 5, Color("202723"))
+			_canvas().draw_set_transform(Vector2.ZERO)
 	if metadata.get("species", "") == "songbird":
 		var target_height := float(metadata.get("altitude", 0))
 		var height := float(_bird_heights.get(str(entity.get("id", "")), target_height))
-		draw_circle(tile_center, 3, Color(0, 0, 0, .18))
+		_canvas().draw_circle(tile_center, 3, Color(0, 0, 0, .18))
 		var center := tile_center - Vector2(0, height)
 		var flight := clampf(absf(height - target_height) / 6, 0, 1) if target_height < 35 else 1.0
 		var flap := sin(_visual_seconds * 12) * 3 * flight
 		var span := 2.0 + flight * 5 + flap
-		draw_colored_polygon(PackedVector2Array([center + Vector2(6, 0), center + Vector2(-5, -span), center + Vector2(-2, 0), center + Vector2(-5, span)]), Color("304c63"))
+		_canvas().draw_colored_polygon(PackedVector2Array([center + Vector2(6, 0), center + Vector2(-5, -span), center + Vector2(-2, 0), center + Vector2(-5, span)]), Color("304c63"))
 		if flight < .4:
-			draw_line(center + Vector2(-1, 1), center + Vector2(-1, 4), Color("bb9762"), 1)
-		draw_circle(center + Vector2(3, 0), 2, Color("e7b56f"))
+			_canvas().draw_line(center + Vector2(-1, 1), center + Vector2(-1, 4), Color("bb9762"), 1)
+		_canvas().draw_circle(center + Vector2(3, 0), 2, Color("e7b56f"))
 		return
 	if _animal_sprite_regions.is_empty():
 		return
@@ -1804,34 +1869,34 @@ func _draw_animal(tile_center: Vector2, entity: Dictionary) -> void:
 	var weather_shiver := sin(_visual_seconds * 18.0 + tile_center.x) * 0.8 if _temperature_c < 3.0 else 0.0
 	# Wind may animate foliage; grounded animals must not slide off their feet.
 	var base := tile_center + Vector2(weather_shiver, 5.0 + bob)
-	NaturalDetails.shadow(self,tile_center,width*.28,_draw_detail_level)
-	draw_set_transform(base, 0.0, Vector2(float(_entity_facing.get(entity_id, 1.0)), 1.0))
-	draw_texture_rect_region(
+	NaturalDetails.shadow(_canvas(),tile_center,width*.28,_draw_detail_level)
+	_canvas().draw_set_transform(base, 0.0, Vector2(float(_entity_facing.get(entity_id, 1.0)), 1.0))
+	_canvas().draw_texture_rect_region(
 		animal_atlas,
 		Rect2(Vector2(-width * 0.5, -height + 4.0), Vector2(width, height)),
 		source
 	)
-	draw_set_transform(Vector2.ZERO)
+	_canvas().draw_set_transform(Vector2.ZERO)
 	if action == "sleep":
 		var rise := fposmod(phase * 0.45, 1.0)
-		draw_string(ThemeDB.fallback_font, base + Vector2(8, -height - rise * 13), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.85, 1.0, 1.0 - rise))
+		_canvas().draw_string(ThemeDB.fallback_font, base + Vector2(8, -height - rise * 13), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.85, 1.0, 1.0 - rise))
 	elif action == "drink" and _draw_detail_level > 0:
 		var ripple := fposmod(phase, 1.0)
-		draw_arc(base + Vector2(10 * float(_entity_facing.get(entity_id, 1.0)), -2), 3 + ripple * 10, 0, TAU, 16, Color(0.6, 0.88, 1.0, (1 - ripple) * 0.55), 1.0)
+		_canvas().draw_arc(base + Vector2(10 * float(_entity_facing.get(entity_id, 1.0)), -2), 3 + ripple * 10, 0, TAU, 16, Color(0.6, 0.88, 1.0, (1 - ripple) * 0.55), 1.0)
 	if action in ["graze", "drink", "root", "feed", "hunt", "sleep", "ruminate", "groom", "preen"]:
 		var feedback_color := {
 			"graze": Color("7ee0a4"), "drink": Color("70c8e8"),
 			"root": Color("c58b58"), "feed": Color("e88962"),
 			"hunt": Color("e88962"), "sleep": Color("a9b8d6")
 		}.get(action, Color("d6e2dd")) as Color
-		draw_circle(base + Vector2(0, -height - 2), 3.0 + sin(phase) * 0.6, feedback_color)
+		_canvas().draw_circle(base + Vector2(0, -height - 2), 3.0 + sin(phase) * 0.6, feedback_color)
 
 
 func _draw_carcass(tile_center: Vector2, quantity: float, state: String) -> void:
 	var scale_factor := clampf(quantity / 18.0, 0.45, 1.2)
 	var color := Color("6f4235") if state == "fresh" else Color("665c4e")
 	var base := tile_center + Vector2(0, 4)
-	draw_colored_polygon(PackedVector2Array([
+	_canvas().draw_colored_polygon(PackedVector2Array([
 		base + Vector2(-15, -3) * scale_factor,
 		base + Vector2(-7, -10) * scale_factor,
 		base + Vector2(11, -8) * scale_factor,
@@ -1839,7 +1904,7 @@ func _draw_carcass(tile_center: Vector2, quantity: float, state: String) -> void
 		base + Vector2(3, 4) * scale_factor,
 		base + Vector2(-11, 3) * scale_factor
 	]), color)
-	draw_circle(base + Vector2(11, -6) * scale_factor, 3.5 * scale_factor, color.lightened(0.08))
+	_canvas().draw_circle(base + Vector2(11, -6) * scale_factor, 3.5 * scale_factor, color.lightened(0.08))
 
 
 func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
@@ -1849,13 +1914,13 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 		var carrier_avatar := str(entity.get("visual_avatar", entity.get("avatar_id", "scout")))
 		var walking := float(_entity_motion_amounts.get(str(entity.get("id", "")), 0.0)) > 0.04
 		var facing := float(_entity_facing.get(str(entity.get("id", "")), 1.0))
-		draw_set_transform(tile_center, 0, Vector2(facing, 1))
+		_canvas().draw_set_transform(tile_center, 0, Vector2(facing, 1))
 		if CitizenVisuals.has_native_action(carrier_avatar, "carry_infant"):
 			_draw_agent_sprite(Vector2.ZERO, "carry_infant" if walking else "cradle", _visual_seconds, carrier_avatar)
 		else:
 			_draw_agent_sprite(Vector2.ZERO, "move" if walking else "idle", _visual_seconds, carrier_avatar)
 			_draw_agent_sprite(Vector2(9, -24), "idle", _visual_seconds, "family_infant")
-		draw_set_transform(Vector2.ZERO)
+		_canvas().draw_set_transform(Vector2.ZERO)
 		return
 	if not str(entity.get("carried_by", "")).is_empty():
 		return
@@ -1869,46 +1934,46 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 			return
 		var speech_size := speech_text.get_size()
 		var bubble := tile_center + Vector2(-110, -70 - speech_size.y)
-		draw_style_box(_speech_bubble_style(), Rect2(bubble - Vector2(8, 6), speech_size + Vector2(16, 12)))
+		_canvas().draw_style_box(_speech_bubble_style(), Rect2(bubble - Vector2(8, 6), speech_size + Vector2(16, 12)))
 		speech_text.draw(get_canvas_item(), bubble, Color("23483c"))
 	if bool(entity.get("underwater", false)):
-		draw_arc(tile_center, 16, 0, TAU, 24, Color(0.7, 0.9, 1, 0.5), 1.5)
+		_canvas().draw_arc(tile_center, 16, 0, TAU, 24, Color(0.7, 0.9, 1, 0.5), 1.5)
 		return
 	if bool(entity.get("indoors", false)) and str(entity.get("action", "")) == "sleep":
 		var home_position: Variant = entity.get("sleep_home_position")
 		if home_position is Array and home_position.size() == 2:
 			var roof := map_to_local(Vector2i(int(home_position[0]), int(home_position[1])))
 			var drift := fposmod(_visual_seconds * 0.4, 1.0)
-			draw_string(ThemeDB.fallback_font, roof + Vector2(8, -80 - drift * 12), "zzz", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.94, 1.0, 1.0 - drift * 0.5))
+			_canvas().draw_string(ThemeDB.fallback_font, roof + Vector2(8, -80 - drift * 12), "zzz", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.94, 1.0, 1.0 - drift * 0.5))
 		return
 	var action := str(entity.get("action", "idle")).to_lower()
 	if action == "shared_meal":
 		var bowl := tile_center + Vector2(14, -19)
-		draw_arc(bowl, 7, 0, PI, 12, Color("c99561"), 4)
+		_canvas().draw_arc(bowl, 7, 0, PI, 12, Color("c99561"), 4)
 		var spoon := bowl + Vector2(-4, -5 - (sin(_visual_seconds * 4) + 1) * 5)
-		draw_line(bowl + Vector2(3, 0), spoon, Color("e8d1a0"), 2, true)
+		_canvas().draw_line(bowl + Vector2(3, 0), spoon, Color("e8d1a0"), 2, true)
 	var action_target: Dictionary = entity.get("action_target", {})
 	if action == "hunt" and not CitizenVisuals.has_native_action(str(entity.get("avatar_id", "scout")), "hunt"):
 		var thrust := maxf(0.0, sin(_visual_seconds * 8.0)) * 13.0
 		var grip := tile_center + Vector2(8 + thrust, -24)
-		draw_line(grip - Vector2(15, -5), grip + Vector2(24, -8), Color("a77947"), 3, true)
-		draw_colored_polygon(PackedVector2Array([grip + Vector2(24, -12), grip + Vector2(33, -11), grip + Vector2(24, -5)]), Color("b9c6ca"))
+		_canvas().draw_line(grip - Vector2(15, -5), grip + Vector2(24, -8), Color("a77947"), 3, true)
+		_canvas().draw_colored_polygon(PackedVector2Array([grip + Vector2(24, -12), grip + Vector2(33, -11), grip + Vector2(24, -5)]), Color("b9c6ca"))
 	if action == "fish" and action_target.has("water_x") and int(entity.get("x", 0)) == int(action_target.get("x", -1)) and int(entity.get("y", 0)) == int(action_target.get("y", -1)):
 		var bobber := map_to_local(Vector2i(int(action_target.water_x), int(action_target.water_y))) + Vector2(0, sin(_visual_seconds * 3) * 2)
 		var hand := tile_center + Vector2(8, -24)
 		var tip := hand + (bobber - hand).normalized() * 32 + Vector2(0, -25 + sin(_visual_seconds * 2))
-		draw_line(hand, tip, Color("bd9158"), 3, true)
-		draw_polyline(PackedVector2Array([tip, (tip + bobber) * .5 + Vector2(0, 10), bobber]), Color("cbd6c7"), 1, true)
-		draw_circle(bobber, 2.5, Color("e58158"))
+		_canvas().draw_line(hand, tip, Color("bd9158"), 3, true)
+		_canvas().draw_polyline(PackedVector2Array([tip, (tip + bobber) * .5 + Vector2(0, 10), bobber]), Color("cbd6c7"), 1, true)
+		_canvas().draw_circle(bobber, 2.5, Color("e58158"))
 		var ring := fposmod(_visual_seconds * .7, 1)
-		draw_arc(bobber, 3 + ring * 8, 0, TAU, 16, Color(.8, .94, 1, (1-ring)*.5), 1)
+		_canvas().draw_arc(bobber, 3 + ring * 8, 0, TAU, 16, Color(.8, .94, 1, (1-ring)*.5), 1)
 	elif action == "cook" and int(entity.get("x", 0)) == int(action_target.get("x", -1)) and int(entity.get("y", 0)) == int(action_target.get("y", -1)):
 		var pan := tile_center + Vector2(18, -16)
-		draw_line(tile_center + Vector2(3, -20), pan, Color("b79560"), 3)
-		draw_arc(pan, 9, 0, PI, 12, Color("45434c"), 4)
+		_canvas().draw_line(tile_center + Vector2(3, -20), pan, Color("b79560"), 3)
+		_canvas().draw_arc(pan, 9, 0, PI, 12, Color("45434c"), 4)
 		for puff in range(3):
 			var age := fposmod(_visual_seconds * .6 + puff * .33, 1)
-			draw_circle(pan + Vector2(sin(age*5)*3, -age*25), 2+age*3, Color(.85, .88, .86, (1-age)*.4))
+			_canvas().draw_circle(pan + Vector2(sin(age*5)*3, -age*25), 2+age*3, Color(.85, .88, .86, (1-age)*.4))
 	if action in ["gather", "chop", "pluck"] and action_target.has("x") and action_target.has("y"):
 		var at_interaction_tile := (
 			absi(int(entity.get("x", 0)) - int(action_target["x"])) <= 1
@@ -1937,13 +2002,13 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 	var is_player: bool = "player" in entity.get("tags", [])
 	var accent := Color("5de4c1") if is_player else Color("e0b868")
 	# The source sprite supplies the character; code adds only world-space feedback.
-	NaturalDetails.shadow(self,tile_center,13,_draw_detail_level)
+	NaturalDetails.shadow(_canvas(),tile_center,13,_draw_detail_level)
 	var facing := float(_entity_facing.get(entity_key, 1.0))
 	if working and action_target.has("x") and action_target.has("y"):
 		var contact := map_to_local(Vector2i(int(action_target["x"]), int(action_target["y"])))
 		if absf(contact.x - base.x) > 1:
 			facing = signf(contact.x - base.x)
-	draw_set_transform(base, 0.0, Vector2(facing, 1.0))
+	_canvas().draw_set_transform(base, 0.0, Vector2(facing, 1.0))
 	var inventory: Dictionary = entity.get("inventory", {}) if entity.get("inventory") is Dictionary else {}
 	var items: Dictionary = inventory.get("items", {})
 	var carrying_wood := action == "move" and float(items.get("wood", 0)) > 0
@@ -1956,29 +2021,29 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 	else:
 		_draw_agent_sprite(Vector2.ZERO, "move" if travel_mode == "boat" else "carry" if carrying_wood else action, phase, str(entity.get("visual_avatar", entity.get("avatar_id", "scout"))))
 	if travel_mode == "swim":
-		draw_set_transform(base, 0.0, Vector2(facing, 1))
-		draw_arc(Vector2(0, -5), 24 + sin(phase * 5) * 3, 0, PI, 20, Color("a8dfe6"), 2)
+		_canvas().draw_set_transform(base, 0.0, Vector2(facing, 1))
+		_canvas().draw_arc(Vector2(0, -5), 24 + sin(phase * 5) * 3, 0, PI, 20, Color("a8dfe6"), 2)
 	elif travel_mode == "boat":
 		if not bool(entity.get("metadata", {}).get("aboard", false)):
 			_draw_buildable_sprite(Vector2(0,8), "boat")
-		draw_arc(Vector2(0, 8), 38, 0.1, PI - 0.1, 20, Color(0.7, 0.9, 1, 0.6), 1.5)
+		_canvas().draw_arc(Vector2(0, 8), 38, 0.1, PI - 0.1, 20, Color(0.7, 0.9, 1, 0.6), 1.5)
 	if action == "move" and not carrying_wood and travel_mode == "walk":
 		_draw_carried_material(entity)
-	draw_set_transform(Vector2.ZERO)
+	_canvas().draw_set_transform(Vector2.ZERO)
 	if action == "sleep":
 		var sleep_phase := fposmod(_visual_seconds * 0.55, 1.0)
-		draw_string(ThemeDB.fallback_font, base + Vector2(14 + sleep_phase * 6.0, -47 - sleep_phase * 10.0), "Z", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.9, 1.0, 1.0 - sleep_phase * 0.65))
+		_canvas().draw_string(ThemeDB.fallback_font, base + Vector2(14 + sleep_phase * 6.0, -47 - sleep_phase * 10.0), "Z", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.9, 1.0, 1.0 - sleep_phase * 0.65))
 	if action == "socialize":
 		for dot: int in range(3):
-			draw_circle(base + Vector2(-7 + dot * 7, -74 + sin(_visual_seconds * 3 + dot) * 2), 2.0, Color("e8dfbd"))
+			_canvas().draw_circle(base + Vector2(-7 + dot * 7, -74 + sin(_visual_seconds * 3 + dot) * 2), 2.0, Color("e8dfbd"))
 	if bool(entity.get("care_animation", false)) or bool(entity.get("teaching_animation", false)):
 		var teaching := bool(entity.get("teaching_animation", false))
 		var pulse := sin(_visual_seconds * 3.0) * 2.0
-		draw_circle(base + Vector2(15, -54 + pulse), 9, Color("173b46"))
-		draw_string(ThemeDB.fallback_font, base + Vector2(10, -50 + pulse), "?" if teaching else "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("94e5c0"))
+		_canvas().draw_circle(base + Vector2(15, -54 + pulse), 9, Color("173b46"))
+		_canvas().draw_string(ThemeDB.fallback_font, base + Vector2(10, -50 + pulse), "?" if teaching else "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("94e5c0"))
 	if is_player:
-		draw_arc(base + Vector2(0, -12), 18.0, 0.0, TAU, 28, Color(accent, 0.72), 1.6)
-		draw_string(ThemeDB.fallback_font, base + Vector2(-42, -76), str(entity.get("name", "AITIZEN")), HORIZONTAL_ALIGNMENT_CENTER, 84, 10, Color("e8f6f1"))
+		_canvas().draw_arc(base + Vector2(0, -12), 18.0, 0.0, TAU, 28, Color(accent, 0.72), 1.6)
+		_canvas().draw_string(ThemeDB.fallback_font, base + Vector2(-42, -76), str(entity.get("name", "AITIZEN")), HORIZONTAL_ALIGNMENT_CENTER, 84, 10, Color("e8f6f1"))
 	if working:
 		_draw_work_feedback(entity, action, phase)
 		var action_color := {
@@ -1990,8 +2055,8 @@ func _draw_agent(tile_center: Vector2, entity: Dictionary) -> void:
 			"mine": Color("aeb9c0")
 		}.get(action, Color("aebfc4")) as Color
 		var progress: float = clampf(float(entity.get("action_progress", 0.0)), 0.0, 1.0)
-		draw_rect(Rect2(base + Vector2(-17, -64), Vector2(34, 4)), Color("102027"))
-		draw_rect(Rect2(base + Vector2(-16, -63), Vector2(32 * progress, 2)), action_color)
+		_canvas().draw_rect(Rect2(base + Vector2(-17, -64), Vector2(34, 4)), Color("102027"))
+		_canvas().draw_rect(Rect2(base + Vector2(-16, -63), Vector2(32 * progress, 2)), action_color)
 
 
 func _draw_rescue_pair(center: Vector2, entity: Dictionary, towing: bool) -> void:
@@ -2002,23 +2067,23 @@ func _draw_rescue_pair(center: Vector2, entity: Dictionary, towing: bool) -> voi
 	var pose := int(cycle) % 4
 	var lift: float = [0.0, -2.0, 0.0, 1.5][pose]
 	var facing := float(_entity_facing.get(key, 1.0))
-	draw_set_transform(center + Vector2(0, lift), 0, Vector2(facing, 1))
+	_canvas().draw_set_transform(center + Vector2(0, lift), 0, Vector2(facing, 1))
 	var avatar := str(entity.get("visual_avatar", entity.get("avatar_id", "scout")))
 	if towing and not CitizenVisuals.has_native_action(avatar, "swim") and _swim_texture != null:
 		_water_asset(_swim_texture, int(_visual_seconds * 8) % 6, int(CITIZEN_AQUATIC_ROWS.get(avatar, 0)), 6, 8, Vector2(-15, -31), Vector2(100, 100))
 	else:
 		_draw_agent_sprite(Vector2.ZERO, "swim" if towing else "move" if moving else "idle", cycle * 0.16, avatar)
 	var passenger_offset := Vector2(-29, -12) if towing else Vector2(9, -18)
-	draw_set_transform(center + Vector2(passenger_offset.x * facing, passenger_offset.y + lift), sin(cycle * PI * .5) * .04, Vector2(facing * .72, .72))
+	_canvas().draw_set_transform(center + Vector2(passenger_offset.x * facing, passenger_offset.y + lift), sin(cycle * PI * .5) * .04, Vector2(facing * .72, .72))
 	_draw_agent_sprite(Vector2.ZERO, "sleep", 0, str(entity.get("carried_avatar", "scout")))
-	draw_set_transform(center + Vector2(0, lift), 0, Vector2(facing, 1))
+	_canvas().draw_set_transform(center + Vector2(0, lift), 0, Vector2(facing, 1))
 	# Supporting forearms remain in front of the passenger, unlike ordinary walking.
-	draw_polyline(PackedVector2Array([Vector2(-10, -27), Vector2(-15, -40), Vector2(-4, -44)]) if not towing else PackedVector2Array([Vector2(-9, -19), Vector2(-20, -15), Vector2(-28, -16)]), Color("bc956f"), 4, true)
+	_canvas().draw_polyline(PackedVector2Array([Vector2(-10, -27), Vector2(-15, -40), Vector2(-4, -44)]) if not towing else PackedVector2Array([Vector2(-9, -19), Vector2(-20, -15), Vector2(-28, -16)]), Color("bc956f"), 4, true)
 	if towing:
-		draw_arc(Vector2(12, 0), 20 + pose, 0, PI, 16, Color(.7, .9, 1, .5), 1.5)
-	draw_set_transform(Vector2.ZERO)
-	draw_rect(Rect2(center + Vector2(-29, -101), Vector2(58, 18)), Color("102827"))
-	draw_string(ThemeDB.fallback_font, center + Vector2(-24, -88), "RESCUE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("ffcf8a"))
+		_canvas().draw_arc(Vector2(12, 0), 20 + pose, 0, PI, 16, Color(.7, .9, 1, .5), 1.5)
+	_canvas().draw_set_transform(Vector2.ZERO)
+	_canvas().draw_rect(Rect2(center + Vector2(-29, -101), Vector2(58, 18)), Color("102827"))
+	_canvas().draw_string(ThemeDB.fallback_font, center + Vector2(-24, -88), "RESCUE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("ffcf8a"))
 
 
 func _draw_carried_material(entity: Dictionary) -> void:
@@ -2028,12 +2093,12 @@ func _draw_carried_material(entity: Dictionary) -> void:
 	if float(items.get("wood", 0)) > 0:
 		for index: int in range(mini(3, ceili(float(items["wood"]) / 5.0))):
 			var start := Vector2(-17, -26 - index * 4)
-			draw_line(start, start + Vector2(20, 5), Color("845333"), 4)
-			draw_circle(start + Vector2(20, 5), 2, Color("cfa873"))
+			_canvas().draw_line(start, start + Vector2(20, 5), Color("845333"), 4)
+			_canvas().draw_circle(start + Vector2(20, 5), 2, Color("cfa873"))
 	elif float(items.get("stone", 0)) > 0:
-		draw_texture_rect_region(CohesiveArt.texture("items"),Rect2(-17,-32,19,20),CohesiveArt.region("items","stone"))
+		_canvas().draw_texture_rect_region(CohesiveArt.texture("items"),Rect2(-17,-32,19,20),CohesiveArt.region("items","stone"))
 	elif float(items.get("food", 0)) + float(items.get("fruit", 0)) >= 3:
-		draw_texture_rect_region(CohesiveArt.texture("items"),Rect2(-17,-33,24,24),CohesiveArt.region("items","fruit"))
+		_canvas().draw_texture_rect_region(CohesiveArt.texture("items"),Rect2(-17,-33,24,24),CohesiveArt.region("items","fruit"))
 
 
 func work_effect_origin(entity: Dictionary) -> Variant:
@@ -2061,8 +2126,8 @@ func _draw_work_feedback(entity: Dictionary, action: String, phase: float) -> vo
 		var travel := fposmod(phase / 1.2, 1.0)
 		var fruit := (origin + Vector2(0, -62)).lerp(hand, travel)
 		fruit.y -= sin(travel * PI) * 9
-		draw_circle(fruit, 2.5, Color("d66a49"))
-		draw_line(fruit + Vector2(0, -2), fruit + Vector2(1, -5), Color("648e45"), 1)
+		_canvas().draw_circle(fruit, 2.5, Color("d66a49"))
+		_canvas().draw_line(fruit + Vector2(0, -2), fruit + Vector2(1, -5), Color("648e45"), 1)
 		return
 	var tint := Color("d8ab70") if action == "chop" else Color("c4cbd0")
 	if action in ["gather", "pluck"]:
@@ -2071,7 +2136,7 @@ func _draw_work_feedback(entity: Dictionary, action: String, phase: float) -> vo
 	for index: int in range(4):
 		var age := fposmod(phase * 1.25 + float(index) * 0.23, 1.0)
 		var offset := Vector2((float(index) - 1.5) * age * 13.0, -sin(age * PI) * 15.0)
-		draw_circle(origin + Vector2(0, -8) + offset, 1.6 - age * 0.7, Color(tint, (1.0 - age) * 0.85))
+		_canvas().draw_circle(origin + Vector2(0, -8) + offset, 1.6 - age * 0.7, Color(tint, (1.0 - age) * 0.85))
 
 
 func _map_vector_to_local(map_position: Vector2) -> Vector2:
@@ -2105,7 +2170,7 @@ func _draw_agent_sprite(base: Vector2, action: String, phase: float, avatar_id :
 		var ratio := CitizenVisuals.scale_for(avatar_id, action)
 		var source := Rect2(frame[0], frame[1], frame[2], frame[3])
 		var destination := Rect2(base + Vector2(float(frame[4]), -float(frame[3])) * ratio, source.size * ratio)
-		draw_texture_rect_region(CitizenVisuals.texture(avatar_id, action), destination, source)
+		_canvas().draw_texture_rect_region(CitizenVisuals.texture(avatar_id, action), destination, source)
 		return
 	var resolved_avatar := avatar_id if avatar_id in CITIZEN_AVATAR_ORDER else "scout"
 	var tint: Color = Color.WHITE if resolved_avatar == "scout" else Color.WHITE.lerp(CITIZEN_AVATAR_TINTS[resolved_avatar], 0.5)
@@ -2114,7 +2179,7 @@ func _draw_agent_sprite(base: Vector2, action: String, phase: float, avatar_id :
 		var cell := Vector2(sleep_texture.get_size()) / Vector2(4, 3)
 		var frame := animation_frame(phase, 12, 2.4)
 		var source := Rect2(Vector2(frame % 4, floori(float(frame) / 4.0)) * cell, cell)
-		draw_texture_rect_region(sleep_texture, Rect2(base + Vector2(-32, -37), Vector2(64, 43)), source, tint)
+		_canvas().draw_texture_rect_region(sleep_texture, Rect2(base + Vector2(-32, -37), Vector2(64, 43)), source, tint)
 		return
 	if _sprite_atlas == null or _agent_sprite_regions.is_empty():
 		return
@@ -2128,7 +2193,7 @@ func _draw_agent_sprite(base: Vector2, action: String, phase: float, avatar_id :
 	var values: Array = frames[frame_index]
 	var source := Rect2(float(values[0]), float(values[1]), float(values[2]), float(values[3]))
 	var size := Vector2(68.0 * source.size.x / maxf(source.size.y, 1.0), 68.0)
-	draw_texture_rect_region(_sprite_atlas, Rect2(base + Vector2(-size.x * 0.5, -size.y + 3), size), source, tint)
+	_canvas().draw_texture_rect_region(_sprite_atlas, Rect2(base + Vector2(-size.x * 0.5, -size.y + 3), size), source, tint)
 
 
 func _load_sprite_atlas_config() -> void:
@@ -2168,7 +2233,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 				"ore": 34.0, "clay": 24.0, "cactus": 54.0, "herb": 22.0
 			}.get(resource_type, 42.0) as float
 			var expansion_width := expansion_height * expansion_source.size.x / maxf(expansion_source.size.y, 1.0)
-			draw_texture_rect_region(
+			_canvas().draw_texture_rect_region(
 				_expansion_atlas,
 				Rect2(tile_center + Vector2(-expansion_width * 0.5, -expansion_height + 7.0), Vector2(expansion_width, expansion_height)),
 				expansion_source
@@ -2226,7 +2291,7 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		for chip: int in range(4):
 			var direction := Vector2.from_angle(-2.8 + chip * 0.7)
 			var point := tile_center + Vector2(0, -10) + direction * impact * 19 + Vector2(0, impact * impact * 12)
-			draw_circle(point, 1.5, Color(0.8, 0.83, 0.8, 1.0 - impact))
+			_canvas().draw_circle(point, 1.5, Color(0.8, 0.83, 0.8, 1.0 - impact))
 	if resource_type == "tree" and str(resource.get("visual_state", "standing")) == "fallen":
 		var fall_key := str(resource.get("id", "%s,%s" % [resource.get("x", 0), resource.get("y", 0)]))
 		if not _resource_fall_started_ms.has(fall_key):
@@ -2234,13 +2299,13 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		var elapsed := float(_visual_msec() - int(_resource_fall_started_ms[fall_key])) * 0.001
 		var fall_progress := clampf(elapsed / 0.72, 0.0, 1.0)
 		var eased := 1.0 - pow(1.0 - fall_progress, 3.0)
-		draw_set_transform(tile_center + Vector2(0, 7), eased * 1.42, Vector2.ONE)
-		draw_texture_rect_region(
+		_canvas().draw_set_transform(tile_center + Vector2(0, 7), eased * 1.42, Vector2.ONE)
+		_canvas().draw_texture_rect_region(
 			_resource_atlas,
 			Rect2(Vector2(-width * 0.5, -height), Vector2(width, height)),
 			source
 		)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		_canvas().draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return true
 	if resource_type == "tree" and float(resource.get("growth", 1.0)) > 0.40:
 		var chop_progress := _active_chop_progress(resource)
@@ -2248,33 +2313,33 @@ func _draw_resource_sprite(tile_center: Vector2, resource: Dictionary) -> bool:
 		if chop_progress >= 0.0:
 			impact_shake = sin(float(_visual_msec()) * 0.034) * 0.035
 		var sway := _wind_angle(tile_center, 1.25) + impact_shake
-		draw_set_transform(tile_center + Vector2(0, 7), sway, Vector2.ONE)
-		draw_texture_rect_region(
+		_canvas().draw_set_transform(tile_center + Vector2(0, 7), sway, Vector2.ONE)
+		_canvas().draw_texture_rect_region(
 			_resource_atlas,
 			Rect2(Vector2(-width * 0.5, -height), Vector2(width, height)),
 			source
 		)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		_canvas().draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		if chop_progress >= 0.0:
 			var pulse: float = absf(sin(float(_visual_msec()) * 0.025))
 			for chip_index: int in range(3):
 				var chip_angle: float = -2.7 + float(chip_index) * 0.48
 				var chip_distance: float = 10.0 + pulse * (7.0 + float(chip_index) * 2.0)
 				var chip_position: Vector2 = tile_center + Vector2.from_angle(chip_angle) * chip_distance + Vector2(0, 1)
-				draw_circle(chip_position, 1.4, Color("d89a57"))
-			draw_arc(tile_center + Vector2(0, 3), 19.0, PI, TAU, 18, Color(0.96, 0.76, 0.34, 0.35 + pulse * 0.35), 1.5)
+				_canvas().draw_circle(chip_position, 1.4, Color("d89a57"))
+			_canvas().draw_arc(tile_center + Vector2(0, 3), 19.0, PI, TAU, 18, Color(0.96, 0.76, 0.34, 0.35 + pulse * 0.35), 1.5)
 		return true
 	if resource_type in ["plant", "bush", "reeds", "herb", "cactus"]:
 		var flexibility := 2.8 if resource_type in ["plant", "reeds", "herb"] else 1.6
-		draw_set_transform(tile_center + Vector2(0, 7), _wind_angle(tile_center, flexibility), Vector2.ONE)
-		draw_texture_rect_region(
+		_canvas().draw_set_transform(tile_center + Vector2(0, 7), _wind_angle(tile_center, flexibility), Vector2.ONE)
+		_canvas().draw_texture_rect_region(
 			_resource_atlas,
 			Rect2(Vector2(-width * 0.5, -height), Vector2(width, height)),
 			source
 		)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		_canvas().draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return true
-	draw_texture_rect_region(_resource_atlas, destination, source)
+	_canvas().draw_texture_rect_region(_resource_atlas, destination, source)
 	return true
 
 
@@ -2330,6 +2395,9 @@ func _refresh_resource_positions() -> void:
 
 
 func _rebuild_draw_order() -> void:
+	for node in _depth_items.values():
+		node.queue_free()
+	_depth_items.clear()
 	if not _is_dynamic_layer:
 		_cache_mountain_profiles()
 	_ordered_coordinates.clear()
@@ -2337,6 +2405,11 @@ func _rebuild_draw_order() -> void:
 		if _is_coordinate_visible(coordinate):
 			_ordered_coordinates.append(coordinate)
 	_ordered_coordinates.sort_custom(_sort_coordinates)
+	_cap_color_cache.clear()
+	_effect_coordinates.clear()
+	for coordinate: Vector2i in _ordered_coordinates:
+		if _water_profiles.has(coordinate) or posmod(coordinate.x * 17 + coordinate.y * 31,5) == 0:
+			_effect_coordinates.append(coordinate)
 	_terrain_positions.clear()
 	for coordinate: Vector2i in _ordered_coordinates:
 		_terrain_positions[coordinate] = ground_to_local(coordinate)
@@ -2365,6 +2438,10 @@ func _rebuild_draw_order() -> void:
 	for pair: Array in [["resource",_ordered_resources],["structure",_ordered_structures]]:
 		for data: Dictionary in pair[1]:
 			_static_depth_objects.append({"kind":pair[0],"data":data,"base":map_to_local(Vector2i(data.x,data.y)),"sort_y":(float(data.x)+float(data.y))*tile_height*.5})
+
+	for at: Vector2i in _mountain_profiles:
+		_static_depth_objects.append({"kind":"mountain","data":{"x":at.x,"y":at.y,"id":"ridge"},"base":map_to_local(at),"sort_y":(at.x+at.y)*tile_height*.5})
+	_static_depth_objects.sort_custom(_sort_ground_objects)
 
 
 
